@@ -1,4 +1,4 @@
-import { TIERS } from "@/lib/saas/config.js";
+import { listPackages, seedPackagesIfEmpty } from "@/lib/db/repos/packagesRepo.js";
 import Navbar from "./components/Navbar";
 import Hero from "./components/Hero";
 import Problem from "./components/Problem";
@@ -33,12 +33,11 @@ export const metadata = {
   robots: { index: true, follow: true },
 };
 
-// Tier cards render from the same config the gateway enforces.
-const TIER_LIST = Object.entries(TIERS).map(([id, t]) => ({ id, ...t }));
+export const dynamic = "force-dynamic";
 
 // Only FAQPage + SoftwareApplication: both describe facts the page states.
 // No aggregateRating — there are no real reviews to cite.
-const JSON_LD = {
+const buildJsonLd = (packages) => ({
   "@context": "https://schema.org",
   "@graph": [
     {
@@ -48,11 +47,11 @@ const JSON_LD = {
       operatingSystem: "Web",
       description:
         "Gateway routing AI yang menyatukan 40+ provider di balik satu API kompatibel OpenAI, dengan fallback antar akun dan kuota token per paket.",
-      offers: TIER_LIST.map((t) => ({
+      offers: packages.map((t) => ({
         "@type": "Offer",
-        name: t.label,
-        price: String(t.priceUsd),
-        priceCurrency: "USD",
+        name: t.name,
+        price: String(t.priceIdr),
+        priceCurrency: "IDR",
       })),
     },
     {
@@ -64,9 +63,13 @@ const JSON_LD = {
       })),
     },
   ],
-};
+});
 
-export default function LandingPage() {
+export default async function LandingPage() {
+  await seedPackagesIfEmpty();
+  const packages = await listPackages({ activeOnly: true });
+  const jsonLd = buildJsonLd(packages);
+
   return (
     <div className="lp">
       <a href="#konten" className="lp-skip">Lewati ke konten utama</a>
@@ -78,14 +81,14 @@ export default function LandingPage() {
         <HowItWorks />
         <Showcase />
         <UseCases />
-        <Pricing tiers={TIER_LIST} />
+        <Pricing tiers={packages} />
         <Faq />
         <FinalCta />
       </main>
       <SiteFooter />
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(JSON_LD) }}
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
     </div>
   );

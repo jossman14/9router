@@ -10,23 +10,12 @@ function env(name) {
 // SaaS mode. Off by default so self-hosted single-user installs are untouched.
 export const SAAS_MODE = env("SAAS_MODE") === "true";
 
-// Token quota is per billing period (30 days rolling from signup/last reset).
-// rpm = requests/minute per API key. Both are enforced; quota is the hard stop.
-export const TIERS = {
-  free:    { label: "Free",    tokenQuota:     100_000, rpm:  10, maxKeys: 1,  priceUsd: 0 },
-  starter: { label: "Starter", tokenQuota:   1_000_000, rpm:  60, maxKeys: 3,  priceUsd: 9 },
-  pro:     { label: "Pro",     tokenQuota:  10_000_000, rpm: 300, maxKeys: 10, priceUsd: 49 },
-  scale:   { label: "Scale",   tokenQuota: 100_000_000, rpm: 900, maxKeys: 50, priceUsd: 299 },
-};
-
 export const ADMIN_EMAIL = (env("ADMIN_EMAIL") || "").trim().toLowerCase();
 
-export const DEFAULT_TIER = "free";
-export const PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
-
-export function getTier(name) {
-  return TIERS[name] || TIERS[DEFAULT_TIER];
-}
+// Plans are rows in the `packages` table, editable from the admin console —
+// see src/lib/db/repos/packagesRepo.js. There is deliberately no hardcoded
+// tier table here any more: the gateway and every price surface must read the
+// same source, or the site can advertise a quota the router will not honour.
 
 // Fail closed at boot rather than shipping dev defaults to production.
 // ponytail: called from instrumentation/register; throwing here beats a silent

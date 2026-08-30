@@ -1,9 +1,11 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { compactTokens, num, dateTime } from "../saas/format";
+import { compactTokens, num, dateTime, rupiah } from "../saas/format";
+import PackagesTab from "./PackagesTab";
 
 const TABS = [
   { id: "ringkasan", label: "Ringkasan" },
+  { id: "packages", label: "Paket" },
   { id: "users", label: "Pengguna" },
   { id: "orders", label: "Pembelian" },
 ];
@@ -48,7 +50,7 @@ function Overview({ stats }) {
     <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Pengguna" value={num(users.total)} sub={`${num(users.active)} aktif`} />
-        <Stat label="Pendapatan" value={`$${revenue.revenueUsd.toFixed(2)}`} sub={`${num(revenue.paidOrders)} order lunas`} />
+        <Stat label="Pendapatan" value={rupiah(revenue.revenueIdr)} sub={`${num(revenue.paidOrders)} order lunas`} />
         <Stat label="Menunggu proses" value={num(revenue.pendingOrders)} sub="permintaan paket" />
         <Stat label="Token terpakai" value={compactTokens(users.tokensUsed)} sub={`dari ${compactTokens(users.tokenQuota)} kuota`} />
       </div>
@@ -90,7 +92,7 @@ function Overview({ stats }) {
   );
 }
 
-function UsersTab({ users, tiers, onChange, busy, setBusy }) {
+function UsersTab({ users, packages, onChange, busy, setBusy }) {
   async function patch(id, body) {
     setBusy(id);
     await fetch(`/api/admin/users/${id}`, {
@@ -125,11 +127,14 @@ function UsersTab({ users, tiers, onChange, busy, setBusy }) {
               <td className="px-4 py-3">
                 <select
                   className="rounded-lg border border-border bg-surface px-2 py-1 text-sm"
-                  value={u.tier}
+                  value=""
                   disabled={busy === u.id}
-                  onChange={(e) => patch(u.id, { tier: e.target.value })}
+                  onChange={(e) => e.target.value && patch(u.id, { packageId: e.target.value })}
                 >
-                  {tiers.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                  <option value="">{u.packageName || "— belum ada paket —"}</option>
+                  {packages.filter((p) => p.isActive).map((p) => (
+                    <option key={p.id} value={p.id}>Beri paket: {p.name}</option>
+                  ))}
                 </select>
               </td>
               <td className="px-4 py-3 whitespace-nowrap text-text-muted">
@@ -163,13 +168,13 @@ function UsersTab({ users, tiers, onChange, busy, setBusy }) {
   );
 }
 
-function OrdersTab({ orders, users, tiers, onChange, busy, setBusy }) {
-  const [form, setForm] = useState({ userId: "", tier: "pro", amountUsd: "", note: "" });
+function OrdersTab({ orders, users, packages, onChange, busy, setBusy }) {
+  const [form, setForm] = useState({ userId: "", packageId: "", amountIdr: "", note: "" });
   const [error, setError] = useState("");
 
   async function create(e) {
     e.preventDefault();
-    if (!form.userId) return;
+    if (!form.userId || !form.packageId) return;
     setBusy("new");
     setError("");
     const res = await fetch("/api/admin/orders", {
@@ -177,7 +182,7 @@ function OrdersTab({ orders, users, tiers, onChange, busy, setBusy }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...form,
-        amountUsd: form.amountUsd === "" ? undefined : Number(form.amountUsd),
+        amountIdr: form.amountIdr === "" ? undefined : Number(form.amountIdr),
       }),
     }).catch(() => null);
     setBusy(null);
@@ -185,7 +190,7 @@ function OrdersTab({ orders, users, tiers, onChange, busy, setBusy }) {
       setError((await res?.json().catch(() => ({})))?.error || "Gagal membuat order.");
       return;
     }
-    setForm({ userId: "", tier: "pro", amountUsd: "", note: "" });
+    setForm({ userId: "", packageId: "", amountIdr: "", note: "" });
     onChange();
   }
 
@@ -217,16 +222,20 @@ function OrdersTab({ orders, users, tiers, onChange, busy, setBusy }) {
           </select>
           <select
             className="rounded-lg border border-border bg-surface px-3 py-2 text-sm"
-            value={form.tier}
-            onChange={(e) => setForm({ ...form, tier: e.target.value })}
+            value={form.packageId}
+            onChange={(e) => setForm({ ...form, packageId: e.target.value })}
+            required
           >
-            {tiers.map((t) => <option key={t.id} value={t.id}>{t.label} — ${t.priceUsd}</option>)}
+            <option value="">Pilih paket…</option>
+            {packages.filter((p) => p.isActive).map((p) => (
+              <option key={p.id} value={p.id}>{p.name} — {rupiah(p.priceIdr)}</option>
+            ))}
           </select>
           <input
             className="rounded-lg border border-border bg-surface px-3 py-2 text-sm"
-            type="number" min="0" step="0.01" placeholder="Jumlah (opsional)"
-            value={form.amountUsd}
-            onChange={(e) => setForm({ ...form, amountUsd: e.target.value })}
+            type="number" min="0" placeholder="Jumlah Rp (opsional)"
+            value={form.amountIdr}
+            onChange={(e) => setForm({ ...form, amountIdr: e.target.value })}
           />
           <input
             className="rounded-lg border border-border bg-surface px-3 py-2 text-sm"
@@ -236,13 +245,13 @@ function OrdersTab({ orders, users, tiers, onChange, busy, setBusy }) {
           />
         </div>
         <p className="mt-2 text-xs text-text-subtle">
-          Order dibuat berstatus <b>Menunggu</b>. Menandainya lunas akan langsung menerapkan paket
-          dan mengulang periode kuota pengguna.
+          Order dibuat berstatus <b>Menunggu</b>. Menandainya lunas akan menerbitkan langganan
+          baru dengan jatah token paket tersebut, dan langsung mengaktifkannya untuk pengguna.
         </p>
         <button
           type="submit"
           className="mt-3 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-          disabled={busy === "new" || !form.userId}
+          disabled={busy === "new" || !form.userId || !form.packageId}
         >
           {busy === "new" ? "Menyimpan…" : "Buat Order"}
         </button>
@@ -271,8 +280,8 @@ function OrdersTab({ orders, users, tiers, onChange, busy, setBusy }) {
                   <div className="text-text">{o.userEmail || o.userId}</div>
                   {o.note && <div className="text-xs text-text-subtle">{o.note}</div>}
                 </td>
-                <td className="px-4 py-3 capitalize text-text">{o.tier}</td>
-                <td className="px-4 py-3 whitespace-nowrap text-text">${o.amountUsd.toFixed(2)}</td>
+                <td className="px-4 py-3 text-text">{o.packageName || "—"}</td>
+                <td className="px-4 py-3 whitespace-nowrap text-text">{rupiah(o.amountIdr)}</td>
                 <td className="px-4 py-3">
                   <span
                     className={
@@ -317,25 +326,28 @@ function OrdersTab({ orders, users, tiers, onChange, busy, setBusy }) {
   );
 }
 
-export default function AdminConsole({ tiers, adminEmail }) {
+export default function AdminConsole({ adminEmail }) {
   const [tab, setTab] = useState("ringkasan");
   const [stats, setStats] = useState(null);
   const [users, setUsers] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [packages, setPackages] = useState([]);
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState("");
 
   const load = useCallback(async (alive = () => true) => {
     try {
-      const [s, u, o] = await Promise.all([
+      const [s, u, o, p] = await Promise.all([
         fetch("/api/admin/stats", { cache: "no-store" }).then((r) => r.ok ? r.json() : null),
         fetch("/api/admin/users", { cache: "no-store" }).then((r) => r.ok ? r.json() : null),
         fetch("/api/admin/orders", { cache: "no-store" }).then((r) => r.ok ? r.json() : null),
+        fetch("/api/admin/packages", { cache: "no-store" }).then((r) => r.ok ? r.json() : null),
       ]);
       if (!alive()) return;
       setStats(s);
       setUsers(u?.users ?? []);
       setOrders(o?.orders ?? []);
+      setPackages(p?.packages ?? []);
       setError("");
     } catch {
       if (alive()) setError("Gagal memuat data admin.");
@@ -380,11 +392,12 @@ export default function AdminConsole({ tiers, adminEmail }) {
       </div>
 
       {tab === "ringkasan" && <Overview stats={stats} />}
+      {tab === "packages" && <PackagesTab onChange={reload} />}
       {tab === "users" && (
-        <UsersTab users={users} tiers={tiers} onChange={reload} busy={busy} setBusy={setBusy} />
+        <UsersTab users={users} packages={packages} onChange={reload} busy={busy} setBusy={setBusy} />
       )}
       {tab === "orders" && (
-        <OrdersTab orders={orders} users={users} tiers={tiers} onChange={reload} busy={busy} setBusy={setBusy} />
+        <OrdersTab orders={orders} users={users} packages={packages} onChange={reload} busy={busy} setBusy={setBusy} />
       )}
     </div>
   );

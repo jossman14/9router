@@ -60,13 +60,14 @@ function PasswordForm() {
 }
 
 export default function SettingsPanel({ user }) {
+  const sub = user.subscription;
   const rows = [
     ["Email", user.email],
     ["Nama", user.name || "—"],
-    ["Paket", user.tierLabel],
-    ["Kuota token", `${compactTokens(user.tokenQuota)} / periode`],
-    ["Batas laju", `${user.rpm} permintaan / menit`],
-    ["Batas API key", `${user.maxKeys} key`],
+    ["Paket aktif", sub ? sub.packageName : "Belum ada paket"],
+    ["Kuota token", sub ? `${compactTokens(sub.tokenQuota)} per paket` : "—"],
+    ["Batas laju", sub ? `${sub.rpm} permintaan / menit` : "—"],
+    ["Batas API key", sub ? `${sub.maxKeys} key` : "—"],
     ["Bergabung", dateTime(user.createdAt)],
   ];
 

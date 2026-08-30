@@ -1,6 +1,6 @@
 import { EventEmitter } from "events";
 import { getAdapter } from "../driver.js";
-import { hashKey } from "@/lib/saas/keys.js";
+import { hashKey } from "../../saas/keys.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { getMeta, setMeta } from "../helpers/metaStore.js";
 
@@ -298,12 +298,17 @@ export async function saveRequestUsage(entry) {
         ]
       );
 
-      // SaaS metering: charge the owning user inside the same transaction that
-      // records the usage row, so we can never bill without recording or record
-      // without billing.
+      // SaaS metering: charge the user's selected subscription inside the same
+      // transaction that records the usage row, so we can never bill without
+      // recording or record without billing. Quota lives on the subscription,
+      // not the user, so switching package switches the balance being spent.
       const billable = promptTokens + completionTokens;
       if (keyRow?.userId && billable > 0) {
-        db.run(`UPDATE users SET tokensUsed = tokensUsed + ? WHERE id = ?`, [billable, keyRow.userId]);
+        db.run(
+          `UPDATE subscriptions SET tokensUsed = tokensUsed + ?, updatedAt = ?
+           WHERE userId = ? AND isSelected = 1 AND status = 'active'`,
+          [billable, entry.timestamp, keyRow.userId]
+        );
       }
 
       const dateKey = getLocalDateKey(entry.timestamp);

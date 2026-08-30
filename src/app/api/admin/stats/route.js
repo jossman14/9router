@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getAdapter } from "@/lib/db/driver.js";
 import { getRevenueSummary } from "@/lib/db/repos/ordersRepo.js";
-import { SAAS_MODE, TIERS } from "@/lib/saas/config.js";
+import { SAAS_MODE } from "@/lib/saas/config.js";
+import { listPackages } from "@/lib/db/repos/packagesRepo.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -18,16 +19,25 @@ export async function GET() {
 
   const users = db.get(
     `SELECT COUNT(*) AS total,
-            COALESCE(SUM(CASE WHEN isActive = 1 THEN 1 ELSE 0 END), 0) AS active,
-            COALESCE(SUM(tokensUsed), 0) AS tokensUsed,
-            COALESCE(SUM(tokenQuota), 0) AS tokenQuota
+            COALESCE(SUM(CASE WHEN isActive = 1 THEN 1 ELSE 0 END), 0) AS active
      FROM users`
   ) || {};
 
-  const byTier = Object.keys(TIERS).map((id) => ({
-    tier: id,
-    label: TIERS[id].label,
-    users: db.get(`SELECT COUNT(*) AS n FROM users WHERE tier = ?`, [id])?.n ?? 0,
+  // Quota lives on subscriptions now, so totals aggregate the active ones.
+  const quota = db.get(
+    `SELECT COALESCE(SUM(tokensUsed), 0) AS tokensUsed,
+            COALESCE(SUM(tokenQuota), 0) AS tokenQuota
+     FROM subscriptions WHERE status = 'active'`
+  ) || {};
+
+  const packages = await listPackages();
+  const byTier = packages.map((p) => ({
+    tier: p.id,
+    label: p.name,
+    users: db.get(
+      `SELECT COUNT(DISTINCT userId) AS n FROM subscriptions
+       WHERE packageId = ? AND status = 'active' AND isSelected = 1`, [p.id]
+    )?.n ?? 0,
   }));
 
   const since = new Date(Date.now() - DAYS * 86400_000).toISOString();
@@ -46,8 +56,13 @@ export async function GET() {
   }
 
   const topUsers = db.all(
-    `SELECT id, email, name, tier, tokensUsed, tokenQuota
-     FROM users ORDER BY tokensUsed DESC LIMIT 10`
+    `SELECT u.id, u.email, u.name,
+            COALESCE(s.packageName, '—') AS tier,
+            COALESCE(s.tokensUsed, 0) AS tokensUsed,
+            COALESCE(s.tokenQuota, 0) AS tokenQuota
+     FROM users u
+     LEFT JOIN subscriptions s ON s.userId = u.id AND s.isSelected = 1 AND s.status = 'active'
+     ORDER BY tokensUsed DESC LIMIT 10`
   );
 
   const totalRequests = db.get(`SELECT COUNT(*) AS n FROM usageHistory`)?.n ?? 0;
@@ -57,8 +72,8 @@ export async function GET() {
     users: {
       total: Number(users.total) || 0,
       active: Number(users.active) || 0,
-      tokensUsed: Number(users.tokensUsed) || 0,
-      tokenQuota: Number(users.tokenQuota) || 0,
+      tokensUsed: Number(quota.tokensUsed) || 0,
+      tokenQuota: Number(quota.tokenQuota) || 0,
     },
     byTier,
     series: [...buckets.values()],

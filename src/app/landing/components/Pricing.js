@@ -3,25 +3,26 @@ import Reveal from "./Reveal";
 import { IconCheck, IconArrowRight } from "./Icons";
 
 const nf = new Intl.NumberFormat("id-ID");
+const IDR = new Intl.NumberFormat("id-ID", {
+  style: "currency", currency: "IDR", maximumFractionDigits: 0,
+});
 
 function formatQuota(n) {
-  if (n >= 1_000_000) return `${nf.format(n / 1_000_000)} juta token`;
-  if (n >= 1_000) return `${nf.format(n / 1_000)} ribu token`;
+  if (n >= 1_000_000) return `${nf.format(+(n / 1_000_000).toFixed(1))} juta token`;
+  if (n >= 1_000) return `${nf.format(Math.round(n / 1_000))} ribu token`;
   return `${nf.format(n)} token`;
 }
 
-const EXTRA = {
-  free: ["Akses seluruh provider yang terhubung", "Riwayat pemakaian 7 hari"],
-  starter: ["Akses seluruh provider yang terhubung", "Riwayat pemakaian 30 hari", "Combo model dengan fallback"],
-  pro: ["Semua fitur Starter", "Riwayat pemakaian 90 hari", "Prioritas antrean permintaan"],
-  scale: ["Semua fitur Pro", "Riwayat pemakaian penuh", "Kuota khusus sesuai kebutuhan"],
-};
-
 /**
- * Plans are rendered from the same TIERS config the API enforces, so the page
- * can never advertise a quota the gateway does not honour.
+ * Plans render from the same package rows the gateway enforces, so the page can
+ * never advertise a quota or a model the router will not honour.
  */
 export default function Pricing({ tiers = [] }) {
+  // Feature the middle paid plan; with an admin-editable catalogue there is no
+  // fixed "pro" id to hardcode.
+  const paid = tiers.filter((t) => t.priceIdr > 0);
+  const featured = paid.length ? paid[Math.floor((paid.length - 1) / 2)].id : null;
+
   return (
     <section className="lp-section" id="harga" aria-labelledby="harga-heading">
       <div className="lp-container">
@@ -31,8 +32,8 @@ export default function Pricing({ tiers = [] }) {
             Bayar sesuai <span className="lp-accent">kuota token</span> yang Anda butuhkan
           </Reveal>
           <Reveal as="p" className="lp-lead" delay={120}>
-            Kuota dihitung dari total token masuk dan keluar per periode 30 hari. Saat kuota habis,
-            permintaan berhenti — tidak ada tagihan kejutan di akhir bulan.
+            Kuota dihitung dari total token masuk dan keluar. Saat kuota habis, permintaan berhenti —
+            tidak ada tagihan kejutan di akhir bulan.
           </Reveal>
         </div>
 
@@ -42,27 +43,33 @@ export default function Pricing({ tiers = [] }) {
               key={t.id}
               className="lp-plan"
               delay={i * 70}
-              data-featured={t.id === "pro" ? "true" : "false"}
+              data-featured={featured === t.id ? "true" : "false"}
             >
-              {t.id === "pro" && <span className="lp-plan__tag">Paling populer</span>}
-              <span className="lp-plan__name">{t.label}</span>
+              {featured === t.id && <span className="lp-plan__tag">Paling populer</span>}
+              <span className="lp-plan__name">{t.name}</span>
               <span className="lp-plan__price">
-                <b>{t.priceUsd === 0 ? "Gratis" : `$${t.priceUsd}`}</b>
-                {t.priceUsd > 0 && <span>/bulan</span>}
+                <b>{t.priceIdr === 0 ? "Gratis" : IDR.format(t.priceIdr)}</b>
+                {t.priceIdr > 0 && <span>/{t.durationDays} hari</span>}
               </span>
-              <span className="lp-plan__quota">{formatQuota(t.tokenQuota)} / periode</span>
+              <span className="lp-plan__quota">{formatQuota(t.tokenQuota)}</span>
               <ul className="lp-plan__list">
                 <li><IconCheck /> {t.rpm} permintaan per menit</li>
                 <li><IconCheck /> {t.maxKeys} API key</li>
-                {(EXTRA[t.id] || []).map((f) => <li key={f}><IconCheck /> {f}</li>)}
+                <li>
+                  <IconCheck />
+                  {t.allowedModels?.length
+                    ? `Model: ${t.allowedModels.join(", ")}`
+                    : "Semua model yang tersedia"}
+                </li>
+                {t.description && <li><IconCheck /> {t.description}</li>}
               </ul>
               <div className="lp-plan__cta">
                 <Link
                   href="/register"
-                  className={`lp-btn ${t.id === "pro" ? "lp-btn--primary" : "lp-btn--secondary"}`}
+                  className={`lp-btn ${featured === t.id ? "lp-btn--primary" : "lp-btn--secondary"}`}
                 >
-                  {t.priceUsd === 0 ? "Mulai Gratis" : `Pilih ${t.label}`}
-                  {t.id === "pro" && (
+                  {t.priceIdr === 0 ? "Mulai Gratis" : `Pilih ${t.name}`}
+                  {featured === t.id && (
                     <span className="lp-btn__disc" aria-hidden="true"><IconArrowRight width="13" height="13" /></span>
                   )}
                 </Link>

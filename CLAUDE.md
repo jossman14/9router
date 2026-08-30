@@ -79,45 +79,52 @@ State is **no longer `db.json`**. It's a SQLite layer under `src/lib/db/` with a
 - DB file location resolves via `src/lib/db/paths.js` (`DATA_DIR`, else `~/.9router/`).
 - Usage/logs (`src/lib/usageDb.js`, `usage.json` + `log.txt`) still live under `~/.9router` and do **not** follow `DATA_DIR`.
 
-### SaaS mode (`src/lib/saas/`)
-Multi-tenant layer, gated behind `SAAS_MODE=true`. Off by default — self-hosted
+### SaaS mode (`src/lib/saas/`, `packages` + `subscriptions`)
+Multi-tenant layer behind `SAAS_MODE=true`. Off by default — self-hosted
 single-user installs take none of these paths.
 
-- `config.js` — the `TIERS` table (quota / rpm / maxKeys / price) and `SAAS_MODE`.
-  **Read env through the local `env()` helper, never `process.env.X` directly.**
-  A static `process.env.SAAS_MODE` is inlined into the middleware/proxy bundle at
-  `next build`, so the flag would apply to route handlers but not to the gate in
-  front of them. Every plan surface (landing pricing, dashboard, quota check)
-  renders from `TIERS`, so the page can't advertise a quota the gateway won't honour.
-- `keys.js` — SaaS keys are `sk9r_<43 base64url>`, stored as an HMAC-SHA256 hash
-  peppered with `API_KEY_SECRET`. Plaintext is returned once at creation and never
-  again. `apiKeysRepo.findApiKeyRow()` matches raw OR hash in one query, so legacy
-  machine-bound plaintext keys keep working.
-- `quota.js` — the single inbound gate (`authorizeApiKey`): key valid → account
-  active → rate limit → token quota. Called from `src/sse/handlers/chat.js`.
-  401 unknown/disabled, 402 quota exhausted, 403 suspended, 429 rate limited.
-- Metering lives **inside the existing `saveRequestUsage` transaction**
-  (`usageRepo.js`) — usage row and `users.tokensUsed` increment commit together.
-  That function also rewrites `entry.apiKey` to the non-secret key prefix, so the
-  usage table never stores a live credential.
-- Tenancy: `users` table; `apiKeys.userId` scopes ownership. `/api/keys/[id]`
-  treats another tenant's key as 404. `dashboardGuard.js` has `SAAS_ADMIN_ONLY`
-  (settings, providers, oauth, usage, …) — operator surfaces expose upstream
-  credentials and every tenant's data, so they are role=admin only, and the
-  loopback bypass in `canAccessPublicLlmApi` is disabled entirely in SaaS mode.
-- **Three roles.** `SAAS_MODE=false` is the default 9Router operator experience
-  (unchanged). With it on, `role=admin` keeps the full operator console *plus*
-  `/dashboard/admin` (users, plans, purchases); `role=user` gets only the tenant
-  dashboard. Role is decided at signup by `resolveRole()` in `usersRepo.js`:
-  `ADMIN_EMAIL` wins, else the first-ever account becomes admin so a fresh
-  install is administrable — set `ADMIN_EMAIL` before opening public signups.
-- Billing is manual: `orders` rows are the audit trail for a plan change.
-  Only `applyPaidOrder()` moves a tier, and it flips status + tier + quota +
-  period reset in one transaction. Users can file a *pending* order via
-  `/api/me/orders` but can never grant themselves a plan.
-- Self-check: `tests/unit/saas-quota.test.js` (hashing, metering, quota block,
-  isolation, rate limit, suspension) and `tests/unit/saas-roles-billing.test.js`
-  (role bootstrap, order lifecycle, revenue). Run both after touching the above.
+**Three roles.** `SAAS_MODE=false` is the stock single-operator 9Router. With it
+on, `role=admin` keeps the full operator console *plus* `/dashboard/admin`;
+`role=user` gets only the tenant dashboard. Role is set at signup by
+`resolveRole()` in `usersRepo.js`: `ADMIN_EMAIL` wins, else the first-ever
+account becomes admin. Seed one deliberately with
+`node scripts/seed-admin.mjs <email> <password>` — **run it before enabling
+SAAS_MODE**, or the admin-only gate locks you out of your own gateway.
+
+**Plans are data, not config.** There is deliberately no hardcoded tier table.
+`packages` rows (admin-editable: `priceIdr`, `tokenQuota`, `allowedModels`,
+`rpm`, `maxKeys`, `durationDays`) are the single source the gateway, the pricing
+page and the dashboards all read, so the site can never advertise a quota or a
+model the router will not honour.
+
+**Quota lives on `subscriptions`, not on the user.** One purchase = one
+subscription carrying its own balance; exactly one row per user has
+`isSelected=1` and that is the balance the gateway spends. Quota and
+`allowedModels` are *snapshotted at purchase*, so editing a package never
+retroactively changes what someone already paid for. A user may hold several and
+switch between them. `users.tier`/`tokenQuota` are legacy dead columns.
+
+- `quota.js` — the one inbound gate, `authorizeApiKey(apiKey, model)`: key valid
+  → account active → active package → rate limit → **model allow-list** → token
+  quota. 401 unknown/disabled, 402 no package or quota gone, 403 suspended or
+  model not in plan, 429 rate limited. `isModelAllowed()` matches bare and
+  `provider/model` forms plus a `provider/*` wildcard; an empty list means any.
+- `keys.js` — keys are `sk9r_<43 base64url>`, stored as an HMAC-SHA256 hash
+  peppered with `API_KEY_SECRET`; plaintext is shown once. `findApiKeyRow()`
+  matches raw OR hash, so legacy machine-bound keys keep working.
+- Metering rides **inside the existing `saveRequestUsage` transaction**
+  (`usageRepo.js`) and charges the selected subscription, so usage and billing
+  commit together. That function also rewrites `entry.apiKey` to the non-secret
+  key prefix — the usage table must never hold a live credential.
+- Billing is manual: an `orders` row is the audit trail. Only `applyPaidOrder()`
+  grants a package (it issues a fresh subscription); re-applying is a no-op.
+  Users can file a *pending* order but can never grant themselves a plan.
+- The DB layer uses **relative imports, not `@/`**, so `scripts/*.mjs` can drive
+  it under plain Node. Keep it that way.
+- Self-checks: `tests/unit/saas-packages.test.js` (allow-list matching,
+  per-subscription quota, purchase grant, snapshot isolation),
+  `saas-quota.test.js`, `saas-roles-billing.test.js`. Run all three after
+  touching any of the above.
 
 ### RTK token saver (`open-sse/rtk/`)
 Pre-translate hooks that compress `tool_result` content in-place to cut tokens. **Fail-open**: any error returns null and leaves the body untouched — never throw out of them. Skips `is_error`/`status:"error"` results to preserve traces.

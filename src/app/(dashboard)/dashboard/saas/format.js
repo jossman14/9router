@@ -37,3 +37,26 @@ export function daysLeft(periodStart) {
   const end = start + 30 * 86400_000;
   return Math.max(0, Math.ceil((end - Date.now()) / 86400_000));
 }
+
+const IDR = new Intl.NumberFormat("id-ID", {
+  style: "currency", currency: "IDR", maximumFractionDigits: 0,
+});
+
+export function rupiah(n) {
+  return IDR.format(Number(n) || 0);
+}
+
+/** "10rb" / "10 jt" style shorthand for compact price labels. */
+export function rupiahShort(n) {
+  const v = Number(n) || 0;
+  if (v === 0) return "Gratis";
+  if (v >= 1_000_000) return `Rp${nf.format(+(v / 1_000_000).toFixed(1))} jt`;
+  if (v >= 1_000) return `Rp${nf.format(Math.round(v / 1_000))}rb`;
+  return IDR.format(v);
+}
+
+export function daysUntil(iso) {
+  const t = Date.parse(iso || "");
+  if (!t) return null;
+  return Math.max(0, Math.ceil((t - Date.now()) / 86400_000));
+}

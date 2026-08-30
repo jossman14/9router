@@ -9,13 +9,21 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "9r-roles-"));
 process.env.DATA_DIR = tmp;
 process.env.API_KEY_SECRET = "test-pepper-that-is-long-enough-for-hmac";
 
-let createUser, getUserById, listUsers, setUserTier;
+let createUser, listUsers;
 let createOrder, applyPaidOrder, setOrderStatus, listOrders, getRevenueSummary;
+let seedPackagesIfEmpty, listPackages, createPackage;
+let ensureSubscription, getActiveSubscription, listSubscriptions;
+let PKG;
 
 beforeAll(async () => {
-  ({ createUser, getUserById, listUsers, setUserTier } = await import("@/lib/db/repos/usersRepo.js"));
+  ({ createUser, listUsers } = await import("@/lib/db/repos/usersRepo.js"));
   ({ createOrder, applyPaidOrder, setOrderStatus, listOrders, getRevenueSummary } =
     await import("@/lib/db/repos/ordersRepo.js"));
+  ({ seedPackagesIfEmpty, listPackages, createPackage } = await import("@/lib/db/repos/packagesRepo.js"));
+  ({ ensureSubscription, getActiveSubscription, listSubscriptions } =
+    await import("@/lib/db/repos/subscriptionsRepo.js"));
+  await seedPackagesIfEmpty();
+  PKG = await createPackage({ name: "Uji Pro", priceIdr: 50_000, tokenQuota: 10_000_000 });
 });
 
 describe("roles", () => {
@@ -33,88 +41,86 @@ describe("roles", () => {
 });
 
 describe("purchase flow", () => {
-  it("a pending order does not change the user's plan", async () => {
+  it("a pending order grants nothing", async () => {
     const u = await createUser({ email: "buyer@example.com", password: "password123" });
-    expect(u.tier).toBe("free");
+    await ensureSubscription(u.id);
+    expect((await getActiveSubscription(u.id)).tokenQuota).toBe(100_000);
 
-    const order = await createOrder({ userId: u.id, tier: "pro", status: "pending" });
+    const order = await createOrder({ userId: u.id, packageId: PKG.id, status: "pending" });
     expect(order.status).toBe("pending");
-    expect(order.amountUsd).toBe(49); // defaults to the tier price
+    expect(order.amountIdr).toBe(50_000); // defaults to the package price
 
-    const after = await getUserById(u.id);
-    expect(after.tier).toBe("free");
-    expect(after.tokenQuota).toBe(100_000);
+    expect((await getActiveSubscription(u.id)).tokenQuota).toBe(100_000);
   });
 
-  it("marking an order paid applies the tier and resets the period", async () => {
+  it("marking an order paid issues the purchased package", async () => {
     const u = await createUser({ email: "buyer2@example.com", password: "password123" });
-    const order = await createOrder({ userId: u.id, tier: "pro", status: "pending" });
+    await ensureSubscription(u.id);
+    const order = await createOrder({ userId: u.id, packageId: PKG.id, status: "pending" });
 
-    // Burn some quota first so the reset is observable.
-    await setUserTier(u.id, "free");
     const paid = await applyPaidOrder(order.id);
     expect(paid.status).toBe("paid");
 
-    const after = await getUserById(u.id);
-    expect(after.tier).toBe("pro");
-    expect(after.tokenQuota).toBe(10_000_000);
-    expect(after.tokensUsed).toBe(0);
+    const active = await getActiveSubscription(u.id);
+    expect(active.packageName).toBe("Uji Pro");
+    expect(active.tokenQuota).toBe(10_000_000);
+    expect(active.tokensUsed).toBe(0);
   });
 
-  it("re-applying a paid order does not reset the period again", async () => {
+  it("re-applying a paid order does not grant a second package", async () => {
     const u = await createUser({ email: "buyer3@example.com", password: "password123" });
-    const order = await createOrder({ userId: u.id, tier: "starter", status: "paid" });
-    const first = await getUserById(u.id);
+    const order = await createOrder({ userId: u.id, packageId: PKG.id, status: "paid" });
+    const before = (await listSubscriptions(u.id)).length;
 
-    const again = await applyPaidOrder(order.id);
-    expect(again.status).toBe("paid");
-    const second = await getUserById(u.id);
-    expect(second.periodStart).toBe(first.periodStart);
+    await applyPaidOrder(order.id);
+    expect((await listSubscriptions(u.id)).length).toBe(before);
   });
 
   it("cancelling leaves the plan untouched", async () => {
     const u = await createUser({ email: "buyer4@example.com", password: "password123" });
-    const order = await createOrder({ userId: u.id, tier: "scale", status: "pending" });
+    await ensureSubscription(u.id);
+    const order = await createOrder({ userId: u.id, packageId: PKG.id, status: "pending" });
     await setOrderStatus(order.id, "cancelled");
 
-    const after = await getUserById(u.id);
-    expect(after.tier).toBe("free");
+    expect((await getActiveSubscription(u.id)).tokenQuota).toBe(100_000);
     expect((await listOrders({ userId: u.id }))[0].status).toBe("cancelled");
   });
 
-  it("rejects an unknown tier and an unknown user", async () => {
+  it("rejects an unknown package and an unknown user", async () => {
     const u = await createUser({ email: "buyer5@example.com", password: "password123" });
-    await expect(createOrder({ userId: u.id, tier: "platinum" })).rejects.toThrow(/Unknown tier/);
-    await expect(createOrder({ userId: "does-not-exist", tier: "pro" })).rejects.toThrow(/Unknown user/);
+    await expect(createOrder({ userId: u.id, packageId: "nope" })).rejects.toThrow(/Paket tidak ditemukan/);
+    await expect(createOrder({ userId: "ghost", packageId: PKG.id })).rejects.toThrow(/Pengguna tidak ditemukan/);
   });
 
-  it("counts revenue from paid orders only", async () => {
+  it("counts rupiah revenue from paid orders only", async () => {
     const before = await getRevenueSummary();
     const u = await createUser({ email: "buyer6@example.com", password: "password123" });
-    await createOrder({ userId: u.id, tier: "pro", amountUsd: 100, status: "pending" });
+    await createOrder({ userId: u.id, packageId: PKG.id, amountIdr: 100_000, status: "pending" });
 
     const mid = await getRevenueSummary();
-    expect(mid.revenueUsd).toBe(before.revenueUsd);
+    expect(mid.revenueIdr).toBe(before.revenueIdr);
     expect(mid.pendingOrders).toBe(before.pendingOrders + 1);
 
-    const o = await createOrder({ userId: u.id, tier: "starter", amountUsd: 25, status: "paid" });
-    expect(o.status).toBe("paid");
-    const after = await getRevenueSummary();
-    expect(after.revenueUsd).toBe(before.revenueUsd + 25);
+    await createOrder({ userId: u.id, packageId: PKG.id, amountIdr: 25_000, status: "paid" });
+    expect((await getRevenueSummary()).revenueIdr).toBe(before.revenueIdr + 25_000);
   });
 
   it("scopes order listing to one user", async () => {
     const a = await createUser({ email: "iso1@example.com", password: "password123" });
     const b = await createUser({ email: "iso2@example.com", password: "password123" });
-    await createOrder({ userId: a.id, tier: "pro", status: "pending" });
+    await createOrder({ userId: a.id, packageId: PKG.id, status: "pending" });
 
     expect(await listOrders({ userId: a.id })).toHaveLength(1);
     expect(await listOrders({ userId: b.id })).toHaveLength(0);
   });
 
-  it("lists users for the admin console", async () => {
+  it("lists users for the admin console without password hashes", async () => {
     const all = await listUsers();
     expect(all.length).toBeGreaterThan(3);
     expect(all.every((u) => !("passwordHash" in u))).toBe(true);
+  });
+
+  it("exposes an admin-editable catalogue", async () => {
+    expect((await listPackages()).length).toBeGreaterThanOrEqual(4);
   });
 });

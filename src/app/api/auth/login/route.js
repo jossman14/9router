@@ -10,6 +10,7 @@ import { isLocalRequest } from "@/dashboardGuard";
 import { SAAS_MODE } from "@/lib/saas/config.js";
 import { verifyUserPassword } from "@/lib/db/repos/usersRepo.js";
 import { publicUser } from "@/lib/saas/session.js";
+import { ensureSubscription } from "@/lib/db/repos/subscriptionsRepo.js";
 
 const RESET_HINT = "Forgot password? Reset to default via 9Router CLI → Settings → Reset Password to Default.";
 const NO_STORE_HEADERS = { "Cache-Control": "no-store" };
@@ -58,7 +59,9 @@ export async function POST(request) {
       await setDashboardAuthCookie(cookieStore, request, {
         sub: user.id, ver: user.tokenVersion ?? 1, role: user.role, email: user.email,
       });
-      return NextResponse.json({ success: true, user: publicUser(user) }, { headers: NO_STORE_HEADERS });
+      // Accounts created before packages existed still need a plan to land on.
+      const sub = await ensureSubscription(user.id);
+      return NextResponse.json({ success: true, user: publicUser(user, sub) }, { headers: NO_STORE_HEADERS });
     }
 
     const settings = await getSettings();

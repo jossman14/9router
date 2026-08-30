@@ -33,6 +33,17 @@ export {
   findApiKeyRow, touchApiKey,
 } from "./repos/apiKeysRepo.js";
 
+// Packages & subscriptions (SaaS plans)
+export {
+  listPackages, getPackageById, getDefaultPackage, createPackage,
+  updatePackage, deletePackage, seedPackagesIfEmpty,
+} from "./repos/packagesRepo.js";
+
+export {
+  listSubscriptions, getSubscriptionById, getActiveSubscription, createSubscription,
+  selectSubscription, ensureSubscription, setSubscriptionStatus, adjustSubscriptionQuota,
+} from "./repos/subscriptionsRepo.js";
+
 // Orders (SaaS billing)
 export {
   listOrders, getOrderById, createOrder, applyPaidOrder,
@@ -42,7 +53,7 @@ export {
 // Users (SaaS)
 export {
   getUserById, getUserByEmail, listUsers, createUser, verifyUserPassword,
-  setUserPassword, setUserTier, setUserActive, rollPeriodIfDue,
+  setUserPassword, setUserActive,
 } from "./repos/usersRepo.js";
 
 // Combos

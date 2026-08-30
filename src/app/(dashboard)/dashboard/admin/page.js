@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { SAAS_MODE, TIERS } from "@/lib/saas/config.js";
+import { SAAS_MODE } from "@/lib/saas/config.js";
 import { getSessionUser } from "@/lib/saas/session.js";
 import AdminConsole from "./AdminConsole";
 
@@ -14,6 +14,5 @@ export default async function AdminPage() {
   const user = await getSessionUser();
   if (!user || user.role !== "admin") redirect("/dashboard");
 
-  const tiers = Object.entries(TIERS).map(([id, t]) => ({ id, ...t }));
-  return <AdminConsole tiers={tiers} adminEmail={user.email} />;
+  return <AdminConsole adminEmail={user.email} />;
 }

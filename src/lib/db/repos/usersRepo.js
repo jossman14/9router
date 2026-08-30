@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import bcrypt from "bcryptjs";
 import { getAdapter } from "../driver.js";
-import { getTier, DEFAULT_TIER, PERIOD_MS, ADMIN_EMAIL } from "@/lib/saas/config.js";
+import { ADMIN_EMAIL } from "../../saas/config.js";
 
 const BCRYPT_ROUNDS = 12;
 
@@ -32,7 +32,29 @@ export async function getUserById(id) {
 
 export async function listUsers() {
   const db = await getAdapter();
-  return db.all(`SELECT * FROM users ORDER BY createdAt DESC`).map(rowToUser);
+  // Join the selected subscription so the admin console shows the plan a user
+  // is actually spending against, not a stale column.
+  return db.all(
+    `SELECT u.*,
+            s.id AS subscriptionId, s.packageId, s.packageName,
+            COALESCE(s.tokenQuota, 0) AS subTokenQuota,
+            COALESCE(s.tokensUsed, 0) AS subTokensUsed,
+            s.expiresAt
+     FROM users u
+     LEFT JOIN subscriptions s ON s.userId = u.id AND s.isSelected = 1 AND s.status = 'active'
+     ORDER BY u.createdAt DESC`
+  ).map((r) => {
+    const u = rowToUser(r);
+    return {
+      ...u,
+      subscriptionId: r.subscriptionId || null,
+      packageId: r.packageId || null,
+      packageName: r.packageName || null,
+      tokenQuota: Number(r.subTokenQuota) || 0,
+      tokensUsed: Number(r.subTokensUsed) || 0,
+      expiresAt: r.expiresAt || null,
+    };
+  });
 }
 
 /**
@@ -57,7 +79,7 @@ function resolveRole(db, email, explicitRole) {
   return "user";
 }
 
-export async function createUser({ email, password, name = "", tier = DEFAULT_TIER, role = null }) {
+export async function createUser({ email, password, name = "", role = null }) {
   const db = await getAdapter();
   const normalized = normalizeEmail(email);
   if (!normalized || !password) throw new Error("email and password are required");
@@ -74,8 +96,10 @@ export async function createUser({ email, password, name = "", tier = DEFAULT_TI
     passwordHash: await bcrypt.hash(password, BCRYPT_ROUNDS),
     name: name || normalized.split("@")[0],
     role: resolvedRole,
-    tier,
-    tokenQuota: getTier(tier).tokenQuota,
+    // The tier/quota columns are legacy: quota lives on `subscriptions` now.
+    // They stay nulled out so nothing reads a stale value by accident.
+    tier: null,
+    tokenQuota: 0,
     tokensUsed: 0,
     periodStart: now,
     tokenVersion: 1,
@@ -115,15 +139,6 @@ export async function setUserPassword(id, password) {
   return true;
 }
 
-export async function setUserTier(id, tier) {
-  const db = await getAdapter();
-  const t = getTier(tier);
-  db.run(
-    `UPDATE users SET tier = ?, tokenQuota = ?, updatedAt = ? WHERE id = ?`,
-    [tier, t.tokenQuota, new Date().toISOString(), id]
-  );
-  return getUserById(id);
-}
 
 export async function setUserActive(id, isActive) {
   const db = await getAdapter();
@@ -132,17 +147,3 @@ export async function setUserActive(id, isActive) {
   return getUserById(id);
 }
 
-/**
- * Roll the billing period if it has elapsed, then return the fresh row.
- * Called on the hot path, so it only writes when a reset is actually due.
- */
-export async function rollPeriodIfDue(id) {
-  const db = await getAdapter();
-  const row = db.get(`SELECT * FROM users WHERE id = ?`, [id]);
-  if (!row) return null;
-  const started = Date.parse(row.periodStart || "") || 0;
-  if (started && Date.now() - started < PERIOD_MS) return rowToUser(row);
-  const now = new Date().toISOString();
-  db.run(`UPDATE users SET tokensUsed = 0, periodStart = ?, updatedAt = ? WHERE id = ?`, [now, now, id]);
-  return rowToUser({ ...row, tokensUsed: 0, periodStart: now });
-}

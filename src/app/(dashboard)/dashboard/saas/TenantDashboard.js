@@ -82,10 +82,11 @@ function UsageSkeleton() {
   );
 }
 
-export default function TenantDashboard({ initialUser, baseUrl, tiers = [] }) {
+export default function TenantDashboard({ initialUser, baseUrl }) {
   const [tab, setTab] = useState("ringkasan");
   const [user, setUser] = useState(initialUser);
   const [usage, setUsage] = useState(null);
+  const [subscriptions, setSubscriptions] = useState([]);
   const [error, setError] = useState("");
 
   // `alive` guards against writing state after unmount (fast tab switches, or
@@ -104,6 +105,7 @@ export default function TenantDashboard({ initialUser, baseUrl, tiers = [] }) {
       const u = await useRes.json().catch(() => ({}));
       if (!alive()) return;
       if (me.user) setUser(me.user);
+      setSubscriptions(me.subscriptions ?? []);
       setUsage(u);
       setError("");
     } catch {
@@ -140,7 +142,7 @@ export default function TenantDashboard({ initialUser, baseUrl, tiers = [] }) {
           </Link>
 
           <div className="sd-top__spacer" />
-          <span className="sd-plan">Paket {user.tierLabel}</span>
+          <span className="sd-plan">{user.subscription ? user.subscription.packageName : "Tanpa paket"}</span>
 
           <div className="sd-user">
             <span className="sd-avatar" aria-hidden="true">{initial}</span>
@@ -201,7 +203,7 @@ export default function TenantDashboard({ initialUser, baseUrl, tiers = [] }) {
                 <h1 className="sd-h1">API key</h1>
                 <p className="sd-sub">Terbitkan satu key per aplikasi agar pemakaiannya mudah ditelusuri.</p>
               </div>
-              {usage ? <KeysPanel keys={keys} maxKeys={user.maxKeys} onChange={reload} /> : <UsageSkeleton />}
+              {usage ? <KeysPanel keys={keys} maxKeys={user.subscription?.maxKeys ?? 1} onChange={reload} /> : <UsageSkeleton />}
               <QuickStart baseUrl={baseUrl} />
             </>
           )}
@@ -228,7 +230,7 @@ export default function TenantDashboard({ initialUser, baseUrl, tiers = [] }) {
                 <h1 className="sd-h1">Paket &amp; Tagihan</h1>
                 <p className="sd-sub">Lihat paket aktif, ajukan perubahan, dan telusuri riwayat pembelian.</p>
               </div>
-              <BillingPanel user={user} tiers={tiers} />
+              <BillingPanel subscriptions={subscriptions} onChange={reload} />
             </>
           )}
 

@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
-import { SAAS_MODE, getTier } from "@/lib/saas/config.js";
-import { generateKey, hashKey } from "@/lib/saas/keys.js";
+import { SAAS_MODE } from "../../saas/config.js";
+import { generateKey, hashKey } from "../../saas/keys.js";
 
 function rowToKey(row) {
   if (!row) return null;
@@ -44,12 +44,22 @@ export async function createApiKey(name, machineId, userId = null) {
 
   if (SAAS_MODE || userId) {
     if (!userId) throw new Error("userId is required in SAAS_MODE");
-    const user = db.get(`SELECT tier FROM users WHERE id = ?`, [userId]);
+    const user = db.get(`SELECT id FROM users WHERE id = ?`, [userId]);
     if (!user) throw new Error("Unknown user");
+    // The key allowance comes from the package the user is currently on.
+    const sub = db.get(
+      `SELECT packageName, maxKeys FROM subscriptions
+       WHERE userId = ? AND isSelected = 1 AND status = 'active' LIMIT 1`, [userId]
+    );
+    if (!sub) {
+      const err = new Error("Belum ada paket aktif. Pilih paket dulu sebelum membuat API key.");
+      err.code = "NO_PACKAGE";
+      throw err;
+    }
     const count = db.get(`SELECT COUNT(*) AS n FROM apiKeys WHERE userId = ?`, [userId])?.n ?? 0;
-    const maxKeys = getTier(user.tier).maxKeys;
+    const maxKeys = Number(sub.maxKeys) || 1;
     if (count >= maxKeys) {
-      const err = new Error(`Key limit reached for the ${user.tier} plan (${maxKeys})`);
+      const err = new Error(`Batas API key untuk paket ${sub.packageName} tercapai (${maxKeys}).`);
       err.code = "KEY_LIMIT";
       throw err;
     }

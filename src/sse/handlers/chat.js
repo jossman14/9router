@@ -66,7 +66,7 @@ export async function handleChat(request, clientRawRequest = null) {
   // Enforce API key if enabled in settings (always enforced in SaaS mode).
   const settings = await getSettings();
   if (settings.requireApiKey || SAAS_MODE) {
-    const auth = await authorizeApiKey(apiKey);
+    const auth = await authorizeApiKey(apiKey, modelStr);
     if (!auth.ok) {
       log.warn("AUTH", `${auth.error} (status ${auth.status})`);
       const headers = auth.retryAfter ? { "Retry-After": String(auth.retryAfter) } : undefined;

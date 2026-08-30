@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { listOrders, createOrder } from "@/lib/db/repos/ordersRepo.js";
 import { getSessionUser } from "@/lib/saas/session.js";
-import { TIERS } from "@/lib/saas/config.js";
+import { getPackageById } from "@/lib/db/repos/packagesRepo.js";
 
 export const dynamic = "force-dynamic";
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -21,8 +21,9 @@ export async function POST(request) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_STORE });
 
-  const { tier } = await request.json().catch(() => ({}));
-  if (!TIERS[tier]) {
+  const { packageId } = await request.json().catch(() => ({}));
+  const pkg = packageId ? await getPackageById(packageId) : null;
+  if (!pkg || !pkg.isActive) {
     return NextResponse.json({ error: "Paket tidak dikenal" }, { status: 400, headers: NO_STORE });
   }
 
@@ -36,7 +37,7 @@ export async function POST(request) {
 
   const order = await createOrder({
     userId: user.id,
-    tier,
+    packageId: pkg.id,
     note: "Diminta oleh pengguna dari dashboard",
     status: "pending",
     createdBy: user.email,

@@ -21,14 +21,14 @@ export async function POST(request) {
   if (!SAAS_MODE) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const admin = await getSessionUser();
   const body = await request.json().catch(() => ({}));
-  if (!body.userId || !body.tier) {
-    return NextResponse.json({ error: "userId and tier are required" }, { status: 400, headers: NO_STORE });
+  if (!body.userId || !body.packageId) {
+    return NextResponse.json({ error: "userId dan packageId wajib diisi" }, { status: 400, headers: NO_STORE });
   }
   try {
     const order = await createOrder({
       userId: body.userId,
-      tier: body.tier,
-      amountUsd: body.amountUsd,
+      packageId: body.packageId,
+      amountIdr: body.amountIdr,
       note: String(body.note || "").slice(0, 300),
       status: body.status === "paid" ? "paid" : "pending",
       createdBy: admin?.email || "admin",

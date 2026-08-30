@@ -3,8 +3,10 @@ import { cookies } from "next/headers";
 import { createUser } from "@/lib/db/repos/usersRepo.js";
 import { setDashboardAuthCookie } from "@/lib/auth/dashboardSession";
 import { checkLock, recordFail, getClientIp } from "@/lib/auth/loginLimiter";
-import { SAAS_MODE, DEFAULT_TIER } from "@/lib/saas/config.js";
+import { SAAS_MODE } from "@/lib/saas/config.js";
 import { publicUser } from "@/lib/saas/session.js";
+import { seedPackagesIfEmpty } from "@/lib/db/repos/packagesRepo.js";
+import { ensureSubscription } from "@/lib/db/repos/subscriptionsRepo.js";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -42,17 +44,21 @@ export async function POST(request) {
   }
 
   try {
+    // A brand-new install has no packages yet; seed before the first signup so
+    // the account has a free plan to land on.
+    await seedPackagesIfEmpty();
+
     const user = await createUser({
       email: body.email,
       password: body.password,
       name: String(body.name || "").slice(0, 100),
-      tier: DEFAULT_TIER,
     });
+    const subscription = await ensureSubscription(user.id);
     const cookieStore = await cookies();
     await setDashboardAuthCookie(cookieStore, request, {
       sub: user.id, ver: user.tokenVersion ?? 1, role: user.role, email: user.email,
     });
-    return NextResponse.json({ success: true, user: publicUser(user) }, { status: 201, headers: NO_STORE });
+    return NextResponse.json({ success: true, user: publicUser(user, subscription) }, { status: 201, headers: NO_STORE });
   } catch (e) {
     if (e.code === "EMAIL_TAKEN") {
       recordFail(ip);

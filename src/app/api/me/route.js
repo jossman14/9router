@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getSessionUser, publicUser } from "@/lib/saas/session.js";
+import { getSessionUser, publicUser, getSessionContext } from "@/lib/saas/session.js";
+import { listSubscriptions } from "@/lib/db/repos/subscriptionsRepo.js";
 import { setUserPassword, verifyUserPassword } from "@/lib/db/repos/usersRepo.js";
 
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -7,9 +8,12 @@ const NO_STORE = { "Cache-Control": "no-store" };
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const user = await getSessionUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_STORE });
-  return NextResponse.json({ user: publicUser(user) }, { headers: NO_STORE });
+  const ctx = await getSessionContext();
+  if (!ctx) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_STORE });
+  return NextResponse.json({
+    user: ctx.publicUser,
+    subscriptions: await listSubscriptions(ctx.user.id),
+  }, { headers: NO_STORE });
 }
 
 // Password change. Re-auth with the current password, which also bumps

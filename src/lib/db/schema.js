@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -115,6 +115,60 @@ export const TABLES = {
     },
     indexes: ["CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)"],
   },
+  // Admin-defined plans. These replace the old hardcoded TIERS table: price,
+  // quota and the allowed model list are all editable from the admin console.
+  packages: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      name: "TEXT NOT NULL",
+      description: "TEXT",
+      // Rupiah, stored as a whole number — no float cents to round badly.
+      priceIdr: "INTEGER DEFAULT 0",
+      tokenQuota: "INTEGER DEFAULT 0",
+      // JSON array of model ids. Empty array means "every routable model".
+      allowedModels: "TEXT DEFAULT '[]'",
+      rpm: "INTEGER DEFAULT 60",
+      maxKeys: "INTEGER DEFAULT 3",
+      durationDays: "INTEGER DEFAULT 30",
+      isActive: "INTEGER DEFAULT 1",
+      sortOrder: "INTEGER DEFAULT 0",
+      createdAt: "TEXT NOT NULL",
+      updatedAt: "TEXT NOT NULL",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_pkg_active ON packages(isActive, sortOrder)",
+    ],
+  },
+  // One purchased package instance. Quota lives here, not on the user, so a
+  // user can hold several and switch which one their traffic draws from.
+  // Quota and model list are snapshotted at purchase: editing a package later
+  // must not silently change what someone already paid for.
+  subscriptions: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      userId: "TEXT NOT NULL",
+      packageId: "TEXT",
+      packageName: "TEXT",
+      tokenQuota: "INTEGER DEFAULT 0",
+      tokensUsed: "INTEGER DEFAULT 0",
+      allowedModels: "TEXT DEFAULT '[]'",
+      rpm: "INTEGER DEFAULT 60",
+      maxKeys: "INTEGER DEFAULT 3",
+      status: "TEXT DEFAULT 'active'",
+      // Exactly one row per user carries isSelected = 1; that is the one the
+      // gateway charges.
+      isSelected: "INTEGER DEFAULT 0",
+      orderId: "TEXT",
+      startedAt: "TEXT NOT NULL",
+      expiresAt: "TEXT",
+      createdAt: "TEXT NOT NULL",
+      updatedAt: "TEXT NOT NULL",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_sub_user ON subscriptions(userId, status)",
+      "CREATE INDEX IF NOT EXISTS idx_sub_selected ON subscriptions(userId, isSelected)",
+    ],
+  },
   // Purchase records. There is no payment gateway wired up: an order is the
   // audit trail for a plan change, whether an admin granted it or a user
   // requested it. Marking one "paid" is what actually applies the tier.
@@ -122,8 +176,11 @@ export const TABLES = {
     columns: {
       id: "TEXT PRIMARY KEY",
       userId: "TEXT NOT NULL",
-      tier: "TEXT NOT NULL",
+      tier: "TEXT",
+      packageId: "TEXT",
+      packageName: "TEXT",
       amountUsd: "REAL DEFAULT 0",
+      amountIdr: "INTEGER DEFAULT 0",
       // pending -> paid | cancelled. Only "paid" moves the user's tier.
       status: "TEXT DEFAULT 'pending'",
       note: "TEXT",
