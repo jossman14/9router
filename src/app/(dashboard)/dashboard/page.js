@@ -1,6 +1,6 @@
 import { headers } from "next/headers";
 import { getMachineId } from "@/shared/utils/machine";
-import { SAAS_MODE } from "@/lib/saas/config.js";
+import { SAAS_MODE, TIERS } from "@/lib/saas/config.js";
 import { getSessionUser, publicUser } from "@/lib/saas/session.js";
 import EndpointPageClient from "./endpoint/EndpointPageClient";
 import TenantDashboard from "./saas/TenantDashboard";
@@ -20,7 +20,14 @@ export default async function DashboardPage() {
   if (SAAS_MODE) {
     const user = await getSessionUser();
     if (user && user.role !== "admin") {
-      return <TenantDashboard initialUser={publicUser(user)} baseUrl={await resolveBaseUrl()} />;
+      const tiers = Object.entries(TIERS).map(([id, t]) => ({ id, ...t }));
+      return (
+        <TenantDashboard
+          initialUser={publicUser(user)}
+          baseUrl={await resolveBaseUrl()}
+          tiers={tiers}
+        />
+      );
     }
   }
   const machineId = await getMachineId();

@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -114,6 +114,28 @@ export const TABLES = {
       updatedAt: "TEXT NOT NULL",
     },
     indexes: ["CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)"],
+  },
+  // Purchase records. There is no payment gateway wired up: an order is the
+  // audit trail for a plan change, whether an admin granted it or a user
+  // requested it. Marking one "paid" is what actually applies the tier.
+  orders: {
+    columns: {
+      id: "TEXT PRIMARY KEY",
+      userId: "TEXT NOT NULL",
+      tier: "TEXT NOT NULL",
+      amountUsd: "REAL DEFAULT 0",
+      // pending -> paid | cancelled. Only "paid" moves the user's tier.
+      status: "TEXT DEFAULT 'pending'",
+      note: "TEXT",
+      createdBy: "TEXT",
+      createdAt: "TEXT NOT NULL",
+      updatedAt: "TEXT NOT NULL",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_ord_user ON orders(userId)",
+      "CREATE INDEX IF NOT EXISTS idx_ord_status ON orders(status)",
+      "CREATE INDEX IF NOT EXISTS idx_ord_created ON orders(createdAt DESC)",
+    ],
   },
   combos: {
     columns: {

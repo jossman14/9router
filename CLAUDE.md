@@ -105,8 +105,19 @@ single-user installs take none of these paths.
   (settings, providers, oauth, usage, …) — operator surfaces expose upstream
   credentials and every tenant's data, so they are role=admin only, and the
   loopback bypass in `canAccessPublicLlmApi` is disabled entirely in SaaS mode.
+- **Three roles.** `SAAS_MODE=false` is the default 9Router operator experience
+  (unchanged). With it on, `role=admin` keeps the full operator console *plus*
+  `/dashboard/admin` (users, plans, purchases); `role=user` gets only the tenant
+  dashboard. Role is decided at signup by `resolveRole()` in `usersRepo.js`:
+  `ADMIN_EMAIL` wins, else the first-ever account becomes admin so a fresh
+  install is administrable — set `ADMIN_EMAIL` before opening public signups.
+- Billing is manual: `orders` rows are the audit trail for a plan change.
+  Only `applyPaidOrder()` moves a tier, and it flips status + tier + quota +
+  period reset in one transaction. Users can file a *pending* order via
+  `/api/me/orders` but can never grant themselves a plan.
 - Self-check: `tests/unit/saas-quota.test.js` (hashing, metering, quota block,
-  isolation, rate limit, suspension). Run it after touching any of the above.
+  isolation, rate limit, suspension) and `tests/unit/saas-roles-billing.test.js`
+  (role bootstrap, order lifecycle, revenue). Run both after touching the above.
 
 ### RTK token saver (`open-sse/rtk/`)
 Pre-translate hooks that compress `tool_result` content in-place to cut tokens. **Fail-open**: any error returns null and leaves the body untouched — never throw out of them. Skips `is_error`/`status:"error"` results to preserve traces.

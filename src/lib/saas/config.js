@@ -19,6 +19,8 @@ export const TIERS = {
   scale:   { label: "Scale",   tokenQuota: 100_000_000, rpm: 900, maxKeys: 50, priceUsd: 299 },
 };
 
+export const ADMIN_EMAIL = (env("ADMIN_EMAIL") || "").trim().toLowerCase();
+
 export const DEFAULT_TIER = "free";
 export const PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
 

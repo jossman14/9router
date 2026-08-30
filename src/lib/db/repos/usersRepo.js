@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import bcrypt from "bcryptjs";
 import { getAdapter } from "../driver.js";
-import { getTier, DEFAULT_TIER, PERIOD_MS } from "@/lib/saas/config.js";
+import { getTier, DEFAULT_TIER, PERIOD_MS, ADMIN_EMAIL } from "@/lib/saas/config.js";
 
 const BCRYPT_ROUNDS = 12;
 
@@ -35,7 +35,29 @@ export async function listUsers() {
   return db.all(`SELECT * FROM users ORDER BY createdAt DESC`).map(rowToUser);
 }
 
-export async function createUser({ email, password, name = "", tier = DEFAULT_TIER, role = "user" }) {
+/**
+ * Decide the role for a brand-new account.
+ *
+ * ADMIN_EMAIL is the deliberate way to nominate the operator. The empty-table
+ * fallback exists so a fresh install is administrable at all, but it is a race
+ * if the site is public before anyone registers — hence the warning. Set
+ * ADMIN_EMAIL before opening signups.
+ */
+function resolveRole(db, email, explicitRole) {
+  if (explicitRole) return explicitRole;
+  if (ADMIN_EMAIL && email === ADMIN_EMAIL) return "admin";
+  const count = db.get(`SELECT COUNT(*) AS n FROM users`)?.n ?? 0;
+  if (count === 0) {
+    console.warn(
+      "[SaaS] First account created with no ADMIN_EMAIL set — granting admin to " +
+      `${email}. Set ADMIN_EMAIL before exposing signups publicly.`
+    );
+    return "admin";
+  }
+  return "user";
+}
+
+export async function createUser({ email, password, name = "", tier = DEFAULT_TIER, role = null }) {
   const db = await getAdapter();
   const normalized = normalizeEmail(email);
   if (!normalized || !password) throw new Error("email and password are required");
@@ -44,13 +66,14 @@ export async function createUser({ email, password, name = "", tier = DEFAULT_TI
     err.code = "EMAIL_TAKEN";
     throw err;
   }
+  const resolvedRole = resolveRole(db, normalized, role);
   const now = new Date().toISOString();
   const user = {
     id: uuidv4(),
     email: normalized,
     passwordHash: await bcrypt.hash(password, BCRYPT_ROUNDS),
     name: name || normalized.split("@")[0],
-    role,
+    role: resolvedRole,
     tier,
     tokenQuota: getTier(tier).tokenQuota,
     tokensUsed: 0,

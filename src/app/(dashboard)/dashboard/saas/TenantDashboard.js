@@ -2,12 +2,13 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  IconRoute, IconGauge, IconKey, IconChart, IconShield, IconBolt, IconTerminal,
+  IconRoute, IconGauge, IconKey, IconChart, IconShield, IconBolt, IconTerminal, IconLayers,
 } from "@/app/landing/components/Icons";
 import QuotaCard from "./QuotaCard";
 import UsageChart from "./UsageChart";
 import KeysPanel from "./KeysPanel";
 import SettingsPanel from "./SettingsPanel";
+import BillingPanel from "./BillingPanel";
 import { ModelBreakdown, RecentRequests } from "./UsagePanel";
 import { compactTokens, num } from "./format";
 import "./saas-dashboard.css";
@@ -16,6 +17,7 @@ const TABS = [
   { id: "ringkasan", label: "Ringkasan", Icon: IconGauge },
   { id: "keys", label: "API Key", Icon: IconKey },
   { id: "pemakaian", label: "Pemakaian", Icon: IconChart },
+  { id: "paket", label: "Paket & Tagihan", Icon: IconLayers },
   { id: "pengaturan", label: "Pengaturan", Icon: IconShield },
 ];
 
@@ -80,7 +82,7 @@ function UsageSkeleton() {
   );
 }
 
-export default function TenantDashboard({ initialUser, baseUrl }) {
+export default function TenantDashboard({ initialUser, baseUrl, tiers = [] }) {
   const [tab, setTab] = useState("ringkasan");
   const [user, setUser] = useState(initialUser);
   const [usage, setUsage] = useState(null);
@@ -217,6 +219,16 @@ export default function TenantDashboard({ initialUser, baseUrl }) {
                   <RecentRequests recent={usage.recent} />
                 </>
               ) : <UsageSkeleton />}
+            </>
+          )}
+
+          {tab === "paket" && (
+            <>
+              <div>
+                <h1 className="sd-h1">Paket &amp; Tagihan</h1>
+                <p className="sd-sub">Lihat paket aktif, ajukan perubahan, dan telusuri riwayat pembelian.</p>
+              </div>
+              <BillingPanel user={user} tiers={tiers} />
             </>
           )}
 

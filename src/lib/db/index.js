@@ -33,6 +33,12 @@ export {
   findApiKeyRow, touchApiKey,
 } from "./repos/apiKeysRepo.js";
 
+// Orders (SaaS billing)
+export {
+  listOrders, getOrderById, createOrder, applyPaidOrder,
+  setOrderStatus, deleteOrder, getRevenueSummary,
+} from "./repos/ordersRepo.js";
+
 // Users (SaaS)
 export {
   getUserById, getUserByEmail, listUsers, createUser, verifyUserPassword,
