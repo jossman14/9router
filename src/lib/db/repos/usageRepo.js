@@ -1,5 +1,6 @@
 import { EventEmitter } from "events";
 import { getAdapter } from "../driver.js";
+import { hashKey } from "@/lib/saas/keys.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { getMeta, setMeta } from "../helpers/metaStore.js";
 
@@ -249,6 +250,15 @@ export async function saveRequestUsage(entry) {
     const promptTokens = tokens.prompt_tokens || tokens.input_tokens || 0;
     const completionTokens = tokens.completion_tokens || tokens.output_tokens || 0;
 
+    // Resolve the presented key once: the usage table must never hold a live
+    // credential, so SaaS rows are stored under their non-secret prefix.
+    const keyRow = entry.apiKey
+      ? db.get(`SELECT id, userId, keyPrefix FROM apiKeys WHERE key = ? OR key = ?`,
+          [entry.apiKey, hashKey(entry.apiKey)])
+      : null;
+    const usageKeyRef = keyRow?.userId ? (keyRow.keyPrefix || keyRow.id) : (entry.apiKey || null);
+    entry.apiKey = usageKeyRef;
+
     let inserted = false;
 
     // All 3 writes (history insert, daily upsert, lifetime counter) in ONE transaction.
@@ -287,6 +297,14 @@ export async function saveRequestUsage(entry) {
           stringifyJson(tokens), stringifyJson({}),
         ]
       );
+
+      // SaaS metering: charge the owning user inside the same transaction that
+      // records the usage row, so we can never bill without recording or record
+      // without billing.
+      const billable = promptTokens + completionTokens;
+      if (keyRow?.userId && billable > 0) {
+        db.run(`UPDATE users SET tokensUsed = tokensUsed + ? WHERE id = ?`, [billable, keyRow.userId]);
+      }
 
       const dateKey = getLocalDateKey(entry.timestamp);
       const row = db.get(`SELECT data FROM usageDaily WHERE dateKey = ?`, [dateKey]);

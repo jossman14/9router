@@ -1,133 +1,121 @@
-"use client";
+import Reveal from "./Reveal";
+import { IconLayers, IconShield, IconKey, IconChart, IconPlug, IconBolt } from "./Icons";
 
-const FEATURES = [
-  { 
-    icon: "link", 
-    title: "Unified Endpoint", 
-    desc: "Access all providers via a single standard API URL.", 
-    colors: {
-      border: "hover:border-blue-500/50",
-      bg: "hover:bg-blue-500/5",
-      iconBg: "bg-blue-500/10",
-      iconText: "text-blue-500",
-      titleHover: "group-hover:text-blue-400"
-    }
+// Spotlight: format translation, shown as the actual code change (one line).
+function TranslationSpotlight() {
+  return (
+    <div className="lp-code" aria-hidden="true">
+      <div className="lp-code__row lp-code__row--muted">
+        <span className="lp-code__gutter">-</span>
+        <code>base_url = &quot;https://api.openai.com/v1&quot;</code>
+      </div>
+      <div className="lp-code__row lp-code__row--add">
+        <span className="lp-code__gutter">+</span>
+        <code>base_url = &quot;https://app.anda.com/v1&quot;</code>
+      </div>
+      <div className="lp-code__note">
+        Sisa kode Anda tidak berubah. Model apa pun dipanggil lewat skema yang sama.
+      </div>
+      <div className="lp-chiprow">
+        {["gpt-5", "claude-opus-4", "gemini-2.5-pro", "grok-4", "deepseek-v3"].map((m) => (
+          <span key={m} className="lp-chip">{m}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Spotlight: fallback chain, shown as an ordered attempt list.
+function FallbackSpotlight() {
+  const rows = [
+    { label: "Akun utama · Anthropic", state: "limit", note: "429 rate limit" },
+    { label: "Akun cadangan · Anthropic", state: "skip", note: "kuota habis" },
+    { label: "Akun tim · Anthropic", state: "ok", note: "berhasil · 840ms" },
+  ];
+  return (
+    <ul className="lp-chain" aria-hidden="true">
+      {rows.map((r, i) => (
+        <li key={r.label} className="lp-chain__item" data-state={r.state}>
+          <span className="lp-chain__idx">{i + 1}</span>
+          <span className="lp-chain__label">{r.label}</span>
+          <span className="lp-chain__note">{r.note}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+const CARDS = [
+  {
+    Icon: IconKey,
+    title: "API key dengan kuota",
+    body: "Terbitkan key per aplikasi atau per anggota tim. Setiap key terikat pada kuota token paket Anda dan bisa dinonaktifkan kapan saja.",
   },
-  { 
-    icon: "bolt", 
-    title: "Easy Setup", 
-    desc: "Get up and running in minutes with npx command.", 
-    colors: {
-      border: "hover:border-orange-500/50",
-      bg: "hover:bg-orange-500/5",
-      iconBg: "bg-orange-500/10",
-      iconText: "text-orange-500",
-      titleHover: "group-hover:text-orange-400"
-    }
+  {
+    Icon: IconChart,
+    title: "Pemakaian yang transparan",
+    body: "Token masuk, token keluar, dan biaya tercatat per permintaan — dikelompokkan per model, per key, dan per hari.",
   },
-  { 
-    icon: "shield_with_heart", 
-    title: "Model Fallback", 
-    desc: "Automatically switch providers on failure or high latency.", 
-    colors: {
-      border: "hover:border-rose-500/50",
-      bg: "hover:bg-rose-500/5",
-      iconBg: "bg-rose-500/10",
-      iconText: "text-rose-500",
-      titleHover: "group-hover:text-rose-400"
-    }
+  {
+    Icon: IconPlug,
+    title: "Login OAuth atau API key",
+    body: "Hubungkan akun provider lewat OAuth resmi atau API key biasa. Token kedaluwarsa diperbarui otomatis di belakang layar.",
   },
-  { 
-    icon: "monitoring", 
-    title: "Usage Tracking", 
-    desc: "Detailed analytics and cost monitoring across all models.", 
-    colors: {
-      border: "hover:border-purple-500/50",
-      bg: "hover:bg-purple-500/5",
-      iconBg: "bg-purple-500/10",
-      iconText: "text-purple-500",
-      titleHover: "group-hover:text-purple-400"
-    }
-  },
-  { 
-    icon: "key", 
-    title: "OAuth & API Keys", 
-    desc: "Securely manage credentials in one vault.", 
-    colors: {
-      border: "hover:border-amber-500/50",
-      bg: "hover:bg-amber-500/5",
-      iconBg: "bg-amber-500/10",
-      iconText: "text-amber-500",
-      titleHover: "group-hover:text-amber-400"
-    }
-  },
-  { 
-    icon: "cloud_sync", 
-    title: "Cloud Sync", 
-    desc: "Sync your configurations across devices instantly.", 
-    colors: {
-      border: "hover:border-sky-500/50",
-      bg: "hover:bg-sky-500/5",
-      iconBg: "bg-sky-500/10",
-      iconText: "text-sky-500",
-      titleHover: "group-hover:text-sky-400"
-    }
-  },
-  { 
-    icon: "terminal", 
-    title: "CLI Support", 
-    desc: "Works with Claude Code, Codex, Cline, Cursor, and more.", 
-    colors: {
-      border: "hover:border-emerald-500/50",
-      bg: "hover:bg-emerald-500/5",
-      iconBg: "bg-emerald-500/10",
-      iconText: "text-emerald-500",
-      titleHover: "group-hover:text-emerald-400"
-    }
-  },
-  { 
-    icon: "dashboard", 
-    title: "Dashboard", 
-    desc: "Visual dashboard for real-time traffic analysis.", 
-    colors: {
-      border: "hover:border-fuchsia-500/50",
-      bg: "hover:bg-fuchsia-500/5",
-      iconBg: "bg-fuchsia-500/10",
-      iconText: "text-fuchsia-500",
-      titleHover: "group-hover:text-fuchsia-400"
-    }
+  {
+    Icon: IconShield,
+    title: "Kunci disimpan sebagai hash",
+    body: "Key hanya ditampilkan satu kali saat dibuat. Yang tersimpan di database adalah hash-nya, bukan kredensial yang bisa dipakai ulang.",
   },
 ];
 
 export default function Features() {
   return (
-    <section className="py-24 px-6" id="features">
-      <div className="max-w-7xl mx-auto">
-        <div className="mb-16">
-          <h2 className="text-3xl md:text-4xl font-bold mb-4">Powerful Features</h2>
-          <p className="text-gray-400 max-w-xl text-lg">
-            Everything you need to manage your AI infrastructure in one place, built for scale.
-          </p>
+    <section className="lp-section" id="fitur" aria-labelledby="fitur-heading">
+      <div className="lp-container">
+        <div className="lp-section-head">
+          <Reveal as="p" className="lp-eyebrow">Solusinya</Reveal>
+          <Reveal as="h2" id="fitur-heading" className="lp-h2" delay={60}>
+            Satu lapisan routing yang <span className="lp-accent">menangani sisanya</span>
+          </Reveal>
+          <Reveal as="p" className="lp-lead" delay={120}>
+            9Router duduk di antara aplikasi dan provider. Aplikasi Anda cukup tahu satu alamat.
+          </Reveal>
         </div>
-        
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {FEATURES.map((feature) => (
-            <div 
-              key={feature.title}
-              className={`p-6 rounded-xl bg-[#23180f] border border-[#3a2f27] ${feature.colors.border} ${feature.colors.bg} transition-all duration-300 group`}
-            >
-              <div className={`w-10 h-10 rounded-lg ${feature.colors.iconBg} flex items-center justify-center mb-4 ${feature.colors.iconText} group-hover:scale-110 transition-transform duration-300`}>
-                <span className="material-symbols-outlined">{feature.icon}</span>
-              </div>
-              <h3 className={`text-lg font-bold mb-2 ${feature.colors.titleHover} transition-colors`}>
-                {feature.title}
-              </h3>
-              <p className="text-sm text-gray-400 leading-relaxed">{feature.desc}</p>
+
+        <div className="lp-feature-grid">
+          <Reveal className="lp-spotlight lp-span-2">
+            <div className="lp-section-head lp-section-head--start" style={{ marginBottom: 0, gap: ".9rem" }}>
+              <span className="lp-icon" aria-hidden="true"><IconLayers /></span>
+              <h3 className="lp-h3">Ganti model cukup dengan mengganti nama model</h3>
+              <p className="lp-card__body">
+                Permintaan berformat OpenAI, Claude, atau Gemini diterjemahkan otomatis ke format
+                yang dimengerti provider tujuan — termasuk tool call, gambar, dan streaming.
+              </p>
             </div>
+            <TranslationSpotlight />
+          </Reveal>
+
+          <Reveal className="lp-spotlight lp-span-2" delay={80}>
+            <div className="lp-section-head lp-section-head--start" style={{ marginBottom: 0, gap: ".9rem" }}>
+              <span className="lp-icon" aria-hidden="true"><IconBolt /></span>
+              <h3 className="lp-h3">Gagal di satu akun, lanjut ke akun berikutnya</h3>
+              <p className="lp-card__body">
+                Susun beberapa akun dan model sebagai satu combo. Saat satu akun kena limit atau
+                error, permintaan diteruskan ke kandidat berikutnya tanpa perlu retry dari sisi klien.
+              </p>
+            </div>
+            <FallbackSpotlight />
+          </Reveal>
+
+          {CARDS.map(({ Icon, title, body }, i) => (
+            <Reveal key={title} className="lp-card lp-card--interactive" delay={i * 70}>
+              <span className="lp-icon" aria-hidden="true"><Icon /></span>
+              <h3 className="lp-card__title">{title}</h3>
+              <p className="lp-card__body">{body}</p>
+            </Reveal>
           ))}
         </div>
       </div>
     </section>
   );
 }
-

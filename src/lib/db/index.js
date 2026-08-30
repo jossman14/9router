@@ -30,7 +30,14 @@ export {
 // API keys
 export {
   getApiKeys, getApiKeyById, createApiKey, updateApiKey, deleteApiKey, validateApiKey,
+  findApiKeyRow, touchApiKey,
 } from "./repos/apiKeysRepo.js";
+
+// Users (SaaS)
+export {
+  getUserById, getUserByEmail, listUsers, createUser, verifyUserPassword,
+  setUserPassword, setUserTier, setUserActive, rollPeriodIfDue,
+} from "./repos/usersRepo.js";
 
 // Combos
 export {

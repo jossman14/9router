@@ -7,6 +7,9 @@ import { isOidcConfigured } from "@/lib/auth/oidc";
 import { isSamlConfigured } from "@/lib/auth/saml.js";
 import { checkLock, recordFail, recordSuccess, getClientIp } from "@/lib/auth/loginLimiter";
 import { isLocalRequest } from "@/dashboardGuard";
+import { SAAS_MODE } from "@/lib/saas/config.js";
+import { verifyUserPassword } from "@/lib/db/repos/usersRepo.js";
+import { publicUser } from "@/lib/saas/session.js";
 
 const RESET_HINT = "Forgot password? Reset to default via 9Router CLI → Settings → Reset Password to Default.";
 const NO_STORE_HEADERS = { "Cache-Control": "no-store" };
@@ -29,7 +32,35 @@ export async function POST(request) {
       );
     }
 
-    const { password } = await request.json();
+    const { email, password } = await request.json();
+
+    // SaaS: multi-tenant email + password. The single-password operator flow
+    // below stays for self-hosted installs.
+    if (SAAS_MODE) {
+      const user = await verifyUserPassword(email, password);
+      if (!user) {
+        const { remainingBeforeLock } = recordFail(ip);
+        const postLock = checkLock(ip);
+        if (postLock.locked) {
+          return NextResponse.json(
+            { error: `Too many failed attempts. Try again in ${postLock.retryAfter}s.`, retryAfter: postLock.retryAfter },
+            { status: 429, headers: { ...NO_STORE_HEADERS, "Retry-After": String(postLock.retryAfter) } }
+          );
+        }
+        // Never reveal whether the email exists.
+        return NextResponse.json(
+          { error: `Invalid email or password. ${remainingBeforeLock} attempt(s) left before lockout.` },
+          { status: 401, headers: NO_STORE_HEADERS }
+        );
+      }
+      recordSuccess(ip);
+      const cookieStore = await cookies();
+      await setDashboardAuthCookie(cookieStore, request, {
+        sub: user.id, ver: user.tokenVersion ?? 1, role: user.role, email: user.email,
+      });
+      return NextResponse.json({ success: true, user: publicUser(user) }, { headers: NO_STORE_HEADERS });
+    }
+
     const settings = await getSettings();
 
     // Block login via tunnel/tailscale if dashboard access is disabled

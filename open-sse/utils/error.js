@@ -27,12 +27,13 @@ export function buildErrorBody(statusCode, message) {
  * @param {string} message - Error message
  * @returns {Response} HTTP Response object
  */
-export function errorResponse(statusCode, message) {
+export function errorResponse(statusCode, message, extraHeaders) {
   return new Response(JSON.stringify(buildErrorBody(statusCode, message)), {
     status: statusCode,
     headers: {
       "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*"
+      "Access-Control-Allow-Origin": "*",
+      ...(extraHeaders || {})
     }
   });
 }

@@ -79,6 +79,35 @@ State is **no longer `db.json`**. It's a SQLite layer under `src/lib/db/` with a
 - DB file location resolves via `src/lib/db/paths.js` (`DATA_DIR`, else `~/.9router/`).
 - Usage/logs (`src/lib/usageDb.js`, `usage.json` + `log.txt`) still live under `~/.9router` and do **not** follow `DATA_DIR`.
 
+### SaaS mode (`src/lib/saas/`)
+Multi-tenant layer, gated behind `SAAS_MODE=true`. Off by default — self-hosted
+single-user installs take none of these paths.
+
+- `config.js` — the `TIERS` table (quota / rpm / maxKeys / price) and `SAAS_MODE`.
+  **Read env through the local `env()` helper, never `process.env.X` directly.**
+  A static `process.env.SAAS_MODE` is inlined into the middleware/proxy bundle at
+  `next build`, so the flag would apply to route handlers but not to the gate in
+  front of them. Every plan surface (landing pricing, dashboard, quota check)
+  renders from `TIERS`, so the page can't advertise a quota the gateway won't honour.
+- `keys.js` — SaaS keys are `sk9r_<43 base64url>`, stored as an HMAC-SHA256 hash
+  peppered with `API_KEY_SECRET`. Plaintext is returned once at creation and never
+  again. `apiKeysRepo.findApiKeyRow()` matches raw OR hash in one query, so legacy
+  machine-bound plaintext keys keep working.
+- `quota.js` — the single inbound gate (`authorizeApiKey`): key valid → account
+  active → rate limit → token quota. Called from `src/sse/handlers/chat.js`.
+  401 unknown/disabled, 402 quota exhausted, 403 suspended, 429 rate limited.
+- Metering lives **inside the existing `saveRequestUsage` transaction**
+  (`usageRepo.js`) — usage row and `users.tokensUsed` increment commit together.
+  That function also rewrites `entry.apiKey` to the non-secret key prefix, so the
+  usage table never stores a live credential.
+- Tenancy: `users` table; `apiKeys.userId` scopes ownership. `/api/keys/[id]`
+  treats another tenant's key as 404. `dashboardGuard.js` has `SAAS_ADMIN_ONLY`
+  (settings, providers, oauth, usage, …) — operator surfaces expose upstream
+  credentials and every tenant's data, so they are role=admin only, and the
+  loopback bypass in `canAccessPublicLlmApi` is disabled entirely in SaaS mode.
+- Self-check: `tests/unit/saas-quota.test.js` (hashing, metering, quota block,
+  isolation, rate limit, suspension). Run it after touching any of the above.
+
 ### RTK token saver (`open-sse/rtk/`)
 Pre-translate hooks that compress `tool_result` content in-place to cut tokens. **Fail-open**: any error returns null and leaves the body untouched — never throw out of them. Skips `is_error`/`status:"error"` results to preserve traces.
 

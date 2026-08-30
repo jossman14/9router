@@ -1,7 +1,7 @@
-import { proxy as dashboardProxy } from "./dashboardGuard";
+import { guard } from "./dashboardGuard";
 
 export default async function proxy(request) {
-  return dashboardProxy(request);
+  return guard(request);
 }
 
 export const config = {

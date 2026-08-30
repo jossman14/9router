@@ -8,6 +8,8 @@ import {
   isValidApiKey,
 } from "../services/auth.js";
 import { getSettings } from "@/lib/localDb";
+import { authorizeApiKey } from "@/lib/saas/quota.js";
+import { SAAS_MODE } from "@/lib/saas/config.js";
 import { getModelInfo, getComboModels } from "../services/model.js";
 import { handleChatCore } from "open-sse/handlers/chatCore.js";
 import { DEFAULT_HEADROOM_URL } from "@/lib/headroom/detect";
@@ -60,17 +62,14 @@ export async function handleChat(request, clientRawRequest = null) {
     log.debug("AUTH", "No API key provided (local mode)");
   }
 
-  // Enforce API key if enabled in settings
+  // Enforce API key if enabled in settings (always enforced in SaaS mode).
   const settings = await getSettings();
-  if (settings.requireApiKey) {
-    if (!apiKey) {
-      log.warn("AUTH", "Missing API key (requireApiKey=true)");
-      return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");
-    }
-    const valid = await isValidApiKey(apiKey);
-    if (!valid) {
-      log.warn("AUTH", "Invalid API key (requireApiKey=true)");
-      return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key");
+  if (settings.requireApiKey || SAAS_MODE) {
+    const auth = await authorizeApiKey(apiKey);
+    if (!auth.ok) {
+      log.warn("AUTH", `${auth.error} (status ${auth.status})`);
+      const headers = auth.retryAfter ? { "Retry-After": String(auth.retryAfter) } : undefined;
+      return errorResponse(auth.status, auth.error, headers);
     }
   }
 

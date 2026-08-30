@@ -1,66 +1,44 @@
-"use client";
+import Reveal from "./Reveal";
+
+const STEPS = [
+  {
+    title: "Buat akun",
+    body: "Daftar dengan email. Paket Free langsung aktif tanpa kartu kredit.",
+  },
+  {
+    title: "Hubungkan provider",
+    body: "Tambahkan akun OpenAI, Anthropic, Gemini, atau provider lain lewat OAuth maupun API key.",
+  },
+  {
+    title: "Terbitkan API key",
+    body: "Buat key untuk tiap aplikasi. Key ditampilkan sekali, lalu disimpan sebagai hash.",
+  },
+  {
+    title: "Arahkan aplikasi",
+    body: "Ganti base URL ke endpoint 9Router. Pemakaian token langsung terlihat di dashboard.",
+  },
+];
 
 export default function HowItWorks() {
   return (
-    <section className="py-24 border-y border-[#3a2f27] bg-[#23180f]/30" id="how-it-works">
-      <div className="max-w-7xl mx-auto px-6">
-        <div className="mb-16">
-          <h2 className="text-3xl md:text-4xl font-bold mb-4">How 9Router Works</h2>
-          <p className="text-gray-400 max-w-xl text-lg">
-            Data flows seamlessly from your application through our intelligent routing layer to the best provider for the job.
-          </p>
+    <section className="lp-section lp-section--tint" id="cara-kerja" aria-labelledby="cara-heading">
+      <div className="lp-container">
+        <div className="lp-section-head">
+          <Reveal as="p" className="lp-eyebrow">Cara Kerja</Reveal>
+          <Reveal as="h2" id="cara-heading" className="lp-h2" delay={60}>
+            Siap jalan dalam <span className="lp-accent">empat langkah</span>
+          </Reveal>
         </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 relative">
-          {/* Connection line */}
-          <div className="hidden md:block absolute top-12 left-[16%] right-[16%] h-[2px] bg-linear-to-r from-gray-700 via-[#f97815] to-gray-700 -z-10"></div>
-          
-          {/* Step 1: CLI & SDKs */}
-          <div className="flex flex-col gap-6 relative group">
-            <div className="w-24 h-24 rounded-2xl bg-[#181411] border border-[#3a2f27] flex items-center justify-center shadow-xl group-hover:border-gray-500 transition-colors z-10 mx-auto md:mx-0">
-              <span className="material-symbols-outlined text-4xl text-gray-300">terminal</span>
-            </div>
-            <div>
-              <h3 className="text-xl font-bold mb-2">1. CLI &amp; SDKs</h3>
-              <p className="text-sm text-gray-400">
-                Your requests start from your favorite tools or our unified SDK. Just change the base URL.
-              </p>
-            </div>
-          </div>
 
-          {/* Step 2: 9Router Hub */}
-          <div className="flex flex-col gap-6 relative group md:items-center md:text-center">
-            <div className="w-24 h-24 rounded-2xl bg-[#181411] border-2 border-[#f97815] flex items-center justify-center shadow-[0_0_30px_rgba(249,120,21,0.2)] z-10 mx-auto">
-              <span className="material-symbols-outlined text-4xl text-[#f97815] animate-pulse">hub</span>
-            </div>
-            <div>
-              <h3 className="text-xl font-bold mb-2 text-[#f97815]">2. 9Router Hub</h3>
-              <p className="text-sm text-gray-400">
-                Our engine analyzes the prompt, checks provider health, and routes for lowest latency or cost.
-              </p>
-            </div>
-          </div>
-
-          {/* Step 3: AI Providers */}
-          <div className="flex flex-col gap-6 relative group md:items-end md:text-right">
-            <div className="w-24 h-24 rounded-2xl bg-[#181411] border border-[#3a2f27] flex items-center justify-center shadow-xl group-hover:border-gray-500 transition-colors z-10 mx-auto md:mx-0">
-              <div className="grid grid-cols-2 gap-2">
-                <div className="w-6 h-6 rounded bg-white/10"></div>
-                <div className="w-6 h-6 rounded bg-white/10"></div>
-                <div className="w-6 h-6 rounded bg-white/10"></div>
-                <div className="w-6 h-6 rounded bg-white/10"></div>
-              </div>
-            </div>
-            <div>
-              <h3 className="text-xl font-bold mb-2">3. AI Providers</h3>
-              <p className="text-sm text-gray-400">
-                The request is fulfilled by OpenAI, Anthropic, Gemini, or others instantly.
-              </p>
-            </div>
-          </div>
-        </div>
+        <ol className="lp-steps">
+          {STEPS.map((s, i) => (
+            <Reveal as="li" key={s.title} className="lp-step" delay={i * 90} data-active={i === 0 ? "true" : "false"}>
+              <h3 className="lp-card__title">{s.title}</h3>
+              <p className="lp-card__body" style={{ marginTop: ".45rem" }}>{s.body}</p>
+            </Reveal>
+          ))}
+        </ol>
       </div>
     </section>
   );
 }
-

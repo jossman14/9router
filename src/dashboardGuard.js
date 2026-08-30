@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { getSettings, validateApiKey } from "@/lib/localDb";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
-import { verifyDashboardAuthToken } from "@/lib/auth/dashboardSession";
+import { verifyDashboardAuthToken, getDashboardAuthSession } from "@/lib/auth/dashboardSession";
 import { hasTrustedPeerHeaders } from "@/lib/auth/trustedPeer";
+import { SAAS_MODE } from "@/lib/saas/config";
 
 const CLI_TOKEN_HEADER = "x-9r-cli-token";
 const CLI_TOKEN_SALT = "9r-cli-auth";
@@ -25,6 +26,7 @@ const PUBLIC_API_PATHS = [
   "/api/init",
   "/api/locale",
   "/api/auth/login",
+  "/api/auth/register",
   "/api/auth/logout",
   "/api/auth/status",
   "/api/auth/oidc",
@@ -66,6 +68,33 @@ const PROTECTED_API_PATHS = [
   "/api/translator",
   "/api/tunnel",
 ];
+
+// In SaaS mode these are operator surfaces: they expose upstream provider
+// credentials, global settings and every tenant's usage. A signed-in tenant
+// must never reach them — only role=admin.
+const SAAS_ADMIN_ONLY = [
+  "/api/settings",
+  "/api/providers",
+  "/api/provider-nodes",
+  "/api/proxy-pools",
+  "/api/oauth",
+  "/api/usage",
+  "/api/cloud",
+  "/api/media-providers",
+  "/api/pricing",
+  "/api/cli-tools",
+  "/api/mcp",
+  "/api/tunnel",
+  "/api/translator",
+  "/api/combos",
+  "/api/admin",
+];
+
+async function isAdminSession(request) {
+  const token = request.cookies.get("auth_token")?.value;
+  const session = await getDashboardAuthSession(token);
+  return session?.role === "admin";
+}
 
 // Routes that spawn child processes or read host secrets — restrict to localhost.
 const LOCAL_ONLY_PATHS = [
@@ -152,8 +181,13 @@ async function hasValidApiKey(request) {
 }
 
 async function canAccessPublicLlmApi(request) {
-  if (isLocalRequest(request)) return true;
-  if (await hasValidCliToken(request)) return true;
+  // In SaaS mode there is no privileged caller: anything reaching the box
+  // locally (a sidecar, an SSRF hop, a co-tenant process) would otherwise get
+  // unmetered access to every provider account. Key auth is the only door.
+  if (!SAAS_MODE) {
+    if (isLocalRequest(request)) return true;
+    if (await hasValidCliToken(request)) return true;
+  }
   return await hasValidApiKey(request);
 }
 
@@ -220,6 +254,13 @@ export async function proxy(request) {
     return NextResponse.json({ error: "API key required for remote API access" }, { status: 401 });
   }
 
+  if (SAAS_MODE && SAAS_ADMIN_ONLY.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
+    if (!(await isAdminSession(request))) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    return NextResponse.next();
+  }
+
   // Deny-by-default for /api/* — public allow-list bypasses, everything else requires auth.
   if (pathname.startsWith("/api/")) {
     if (isPublicApi(pathname)) return NextResponse.next();
@@ -253,8 +294,9 @@ export async function proxy(request) {
       // On error, keep defaults (require login, block tunnel)
     }
 
-    // If login not required, allow through
-    if (!requireLogin) return NextResponse.next();
+    // If login not required, allow through. Never in SaaS mode: requireLogin is
+    // an operator convenience and must not switch off tenant authentication.
+    if (!requireLogin && !SAAS_MODE) return NextResponse.next();
 
     // Verify JWT token
     const token = request.cookies.get("auth_token")?.value;
@@ -269,10 +311,32 @@ export async function proxy(request) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  // Redirect / to /dashboard if logged in, or /dashboard if it's the root
-  if (pathname === "/") {
+  // Self-host boots straight into the dashboard; SaaS shows the marketing page.
+  if (pathname === "/" && !SAAS_MODE) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
   return NextResponse.next();
+}
+
+const SECURITY_HEADERS = {
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
+  "Cross-Origin-Opener-Policy": "same-origin",
+};
+
+/**
+ * Wraps proxy() so every response — allowed or rejected — carries the baseline
+ * security headers. HSTS is only sent over HTTPS, where it is meaningful.
+ */
+export async function guard(request) {
+  const res = await proxy(request);
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.headers.set(k, v);
+  const proto = request.headers.get("x-forwarded-proto");
+  if (proto === "https" || process.env.AUTH_COOKIE_SECURE === "true") {
+    res.headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
+  return res;
 }
