@@ -27,6 +27,14 @@ export default function ApiKeySelect({ value, onChange, apiKeys = [], cloudEnabl
     [apiKeys, savedKeys]
   );
 
+  // The select already shows options[0] when the parent has no value — push it up so the
+  // displayed key is the one actually used instead of leaving the parent null
+  useEffect(() => {
+    if (value || customMode) return;
+    const first = options.find((o) => o.value !== CUSTOM_VALUE);
+    if (first) onChange(first.url ?? first.value);
+  }, [value, customMode, options, onChange]);
+
   // Derive the active option from value — no sync effects needed when the parent updates it
   const matched = value ? options.find((o) => o.value === value || o.url === value) : null;
   const mode = matched ? matched.value : (customMode || value ? CUSTOM_VALUE : (options[0]?.value ?? CUSTOM_VALUE));
