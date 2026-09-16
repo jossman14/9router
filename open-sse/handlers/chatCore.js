@@ -22,6 +22,7 @@ import { detectClientTool, isNativePassthrough } from "../utils/clientDetector.j
 import { dedupeTools } from "../utils/toolDeduper.js";
 import { injectCaveman } from "../rtk/caveman.js";
 import { injectPonytail } from "../rtk/ponytail.js";
+import { injectSkills } from "../rtk/skillInject.js";
 import { compressMessages, formatRtkLog } from "../rtk/index.js";
 import { compressWithHeadroom, formatHeadroomLog, formatHeadroomSizeLog, isHeadroomPhantomSavings } from "../rtk/headroom.js";
 import { compressWithPxpipe } from "../rtk/pxpipe.js";
@@ -284,6 +285,14 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   if (tokenSaverEnabled && ponytailEnabled && ponytailLevel) {
     injectPonytail(translatedBody, finalFormat, ponytailLevel);
     xf.push(`PONYTAIL:${ponytailLevel}`);
+  }
+
+  // Skill auto-select: match the prompt against ~/.claude/skills and inject what fits
+  if (process.env.SKILL_AUTOSELECT === "true") {
+    const picked = injectSkills(translatedBody, finalFormat, {
+      limit: Number(process.env.SKILL_AUTOSELECT_LIMIT) || 2,
+    });
+    if (picked?.length) xf.push(`SKILLS:${picked.join(",")}`);
   }
 
   // PXPIPE: image bulky context (Claude-format bodies only), last saver before dispatch
