@@ -825,6 +825,20 @@ case "llm7": {
 }
 
 /**
+ * Patch that drops the fallback state a past failure left on a connection:
+ * error code, backoff level, and every modelLock_* key.
+ * @param {object} connection
+ * @returns {object} update patch
+ */
+export function clearedFallbackState(connection) {
+  const patch = { errorCode: null, backoffLevel: 0 };
+  for (const key of Object.keys(connection || {})) {
+    if (key.startsWith("modelLock_")) patch[key] = null;
+  }
+  return patch;
+}
+
+/**
  * Test a single connection by ID, update DB, and return result.
  */
 export async function testSingleConnection(id) {
@@ -870,6 +884,11 @@ export async function testSingleConnection(id) {
         : null
       : new Date().toISOString(),
   };
+
+  // A clean pass means the credentials work now, so drop the fallback state a past
+  // failure left behind — otherwise the connection stays backed off and model-locked
+  // and the router keeps routing around it.
+  if (result.valid && !softWarning) Object.assign(updateData, clearedFallbackState(connection));
 
   if (result.refreshed && result.newTokens) {
     if (result.newTokens.accessToken) updateData.accessToken = result.newTokens.accessToken;
