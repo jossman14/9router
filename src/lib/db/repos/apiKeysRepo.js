@@ -1,15 +1,17 @@
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
 import { SAAS_MODE } from "../../saas/config.js";
-import { generateKey, hashKey } from "../../saas/keys.js";
+import { generateKey, hashKey, decryptKey } from "../../saas/keys.js";
 
 function rowToKey(row) {
   if (!row) return null;
   return {
     id: row.id,
-    // SaaS rows store only the hash, so never surface `key` for them — the
-    // plaintext is shown once, at creation.
+    // SaaS lists expose neither the lookup hash nor the encrypted secret.
+    // Plaintext is available at creation or through the owner-only reveal.
     key: row.userId ? null : row.key,
+    // Boolean only — the ciphertext itself never leaves the repo.
+    hasEncrypted: row.userId ? !!row.keyEncrypted : false,
     keyPrefix: row.keyPrefix || null,
     name: row.name,
     machineId: row.machineId,
@@ -63,12 +65,12 @@ export async function createApiKey(name, machineId, userId = null) {
       err.code = "KEY_LIMIT";
       throw err;
     }
-    const { key, keyHash, keyPrefix } = generateKey();
+    const { key, keyHash, keyPrefix, keyEncrypted } = generateKey();
     const id = uuidv4();
     db.run(
-      `INSERT INTO apiKeys(id, key, name, machineId, userId, keyPrefix, isActive, createdAt)
-       VALUES(?, ?, ?, NULL, ?, ?, 1, ?)`,
-      [id, keyHash, name, userId, keyPrefix, now]
+      `INSERT INTO apiKeys(id, key, name, machineId, userId, keyPrefix, keyEncrypted, isActive, createdAt)
+       VALUES(?, ?, ?, NULL, ?, ?, ?, 1, ?)`,
+      [id, keyHash, name, userId, keyPrefix, keyEncrypted, now]
     );
     // Plaintext returned once and never stored.
     return { id, key, keyPrefix, name, userId, isActive: true, createdAt: now };
@@ -124,6 +126,20 @@ export async function validateApiKey(key) {
   const row = await findApiKeyRow(key);
   if (!row) return false;
   return row.isActive === 1 || row.isActive === true;
+}
+
+/**
+ * Owned reveal only — decrypts the stored ciphertext for the key's owner.
+ * Off the hot path: never called from auth or metering. Returns null when
+ * there is nothing stored (legacy rows) or the pepper/tag no longer matches.
+ */
+export async function revealApiKey(id, userId) {
+  if (!id || !userId) return null;
+  const db = await getAdapter();
+  const row = db.get(`SELECT key, keyEncrypted FROM apiKeys WHERE id = ? AND userId = ?`, [id, userId]);
+  if (!row?.keyEncrypted) return null;
+  const plaintext = decryptKey(row.keyEncrypted);
+  return plaintext && hashKey(plaintext) === row.key ? plaintext : null;
 }
 
 export async function touchApiKey(id) {

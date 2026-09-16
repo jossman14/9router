@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
+import ApiKeyValue from "../endpoint/components/ApiKeyValue";
 import { IconKey, IconClose, IconCheck, IconWarning } from "@/app/landing/components/Icons";
 import { dateTime } from "./format";
 
@@ -10,6 +11,13 @@ function CreateKeyModal({ onClose, onCreated }) {
   const [created, setCreated] = useState(null);
   const [copied, setCopied] = useState(false);
   const inputRef = useRef(null);
+  const close = useEffectEvent(onClose);
+
+  useEffect(() => {
+    if (!created) return;
+    const timer = setTimeout(() => close(), 60_000);
+    return () => clearTimeout(timer);
+  }, [created]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -71,8 +79,8 @@ function CreateKeyModal({ onClose, onCreated }) {
           {created ? (
             <>
               <p className="lp-card__body">
-                Salin sekarang — key ini hanya ditampilkan satu kali. Yang tersimpan di server
-                hanyalah hash-nya, jadi kami tidak bisa menampilkannya lagi.
+                Salin sekarang. Key ini juga bisa ditampilkan lagi nanti lewat
+                tombol Salin pada baris key tersebut.
               </p>
               <div className="sd-reveal">
                 <code>{created.key}</code>
@@ -190,7 +198,7 @@ export default function KeysPanel({ keys, maxKeys, onChange }) {
               {keys.map((k) => (
                 <tr key={k.id}>
                   <td style={{ fontWeight: 600 }}>{k.name}</td>
-                  <td className="sd-mono">{k.keyPrefix ? `${k.keyPrefix}…` : "—"}</td>
+                  <td><ApiKeyValue apiKey={k} /></td>
                   <td>{dateTime(k.createdAt)}</td>
                   <td>{k.lastUsedAt ? dateTime(k.lastUsedAt) : "Belum pernah"}</td>
                   <td>

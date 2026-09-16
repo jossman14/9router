@@ -17,9 +17,9 @@ export async function GET() {
       return NextResponse.json({ keys: await getApiKeys(user.id) }, { headers: NO_STORE });
     }
     return NextResponse.json({ keys: await getApiKeys() }, { headers: NO_STORE });
-  } catch (error) {
-    console.log("Error fetching keys:", error);
-    return NextResponse.json({ error: "Failed to fetch keys" }, { status: 500 });
+  } catch {
+    console.error("Error fetching API keys");
+    return NextResponse.json({ error: "Failed to fetch keys" }, { status: 500, headers: NO_STORE });
   }
 }
 
@@ -28,7 +28,7 @@ export async function POST(request) {
   try {
     const { name } = await request.json();
     if (!name || typeof name !== "string" || !name.trim()) {
-      return NextResponse.json({ error: "Name is required" }, { status: 400 });
+      return NextResponse.json({ error: "Name is required" }, { status: 400, headers: NO_STORE });
     }
 
     if (SAAS_MODE) {
@@ -53,8 +53,8 @@ export async function POST(request) {
     return NextResponse.json({
       key: apiKey.key, name: apiKey.name, id: apiKey.id, machineId: apiKey.machineId,
     }, { status: 201, headers: NO_STORE });
-  } catch (error) {
-    console.log("Error creating key:", error);
-    return NextResponse.json({ error: "Failed to create key" }, { status: 500 });
+  } catch {
+    console.error("Error creating API key");
+    return NextResponse.json({ error: "Failed to create key" }, { status: 500, headers: NO_STORE });
   }
 }

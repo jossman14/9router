@@ -1,8 +1,9 @@
-import { getApiKeys } from "@/lib/localDb";
+import { getApiKeys, getProviderConnections } from "@/lib/localDb";
 import { resolveProviderId } from "@/shared/constants/providers.js";
 import { unwrapClineEnvelope } from "open-sse/shared/clineEnvelope.js";
 import { UPDATER_CONFIG } from "@/shared/constants/config";
 import { getConsistentMachineId } from "@/shared/utils/machineId";
+import { OLLAMA_LOCAL_DEFAULT_HOST, resolveOllamaLocalHost } from "open-sse/config/providers.js";
 
 const CLI_TOKEN_SALT = "9r-cli-auth";
 
@@ -52,7 +53,57 @@ async function getInternalHeaders() {
   return headers;
 }
 
+/**
+ * Direct probe for ollama-local: GET host/api/tags, then exact tag match.
+ * Bypasses gateway auth entirely — Ollama needs no key. A bare "qwen3.8"
+ * does NOT match "qwen3.8:tuned"; on mismatch the error lists what's there.
+ */
+async function pingOllamaLocal(tag) {
+  const start = Date.now();
+  let host = OLLAMA_LOCAL_DEFAULT_HOST;
+  try {
+    const conns = await getProviderConnections({ provider: "ollama-local" });
+    const active = conns.find((c) => c.isActive !== false);
+    if (conns.length && !active) {
+      return { ok: false, latencyMs: Date.now() - start, error: "No active Ollama local connection" };
+    }
+    if (active) host = resolveOllamaLocalHost(active);
+  } catch {
+    return { ok: false, latencyMs: Date.now() - start, error: "Unable to load Ollama local connection" };
+  }
+
+  let res;
+  try {
+    res = await fetch(`${host}/api/tags`, { signal: AbortSignal.timeout(15000) });
+  } catch (err) {
+    return { ok: false, latencyMs: Date.now() - start, error: `Ollama not reachable at ${host} (${err.message})` };
+  }
+  if (!res.ok) {
+    return { ok: false, latencyMs: Date.now() - start, status: res.status, error: `Ollama not reachable at ${host} (HTTP ${res.status})` };
+  }
+  const data = await res.json().catch(() => null);
+  if (!Array.isArray(data?.models)) {
+    return { ok: false, latencyMs: Date.now() - start, error: "Ollama returned an invalid model list" };
+  }
+  const tags = data.models.map((m) => m?.name).filter((name) => typeof name === "string" && name);
+  const wanted = String(tag || "").toLowerCase();
+  const hit = tags.some((t) => t.toLowerCase() === wanted || t.toLowerCase() === `${wanted}:latest`);
+  if (!hit) {
+    const hint = tags.length ? ` Available: ${tags.slice(0, 12).join(", ")}${tags.length > 12 ? ", …" : ""}` : "";
+    return { ok: false, latencyMs: Date.now() - start, error: `Model "${tag}" not found on Ollama at ${host}.${hint}` };
+  }
+  return { ok: true, latencyMs: Date.now() - start, error: null, status: 200 };
+}
+
 export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:${process.env.PORT || UPDATER_CONFIG.appPort}`) {
+  // No-auth local providers answer from localhost directly, so probe them there
+  // instead of routing through the gateway (which demands a SaaS API key and
+  // would 401 even though Ollama itself needs no key).
+  const slash = String(model || "").indexOf("/");
+  if (slash > 0 && String(model).slice(0, slash) === "ollama-local") {
+    return pingOllamaLocal(String(model).slice(slash + 1));
+  }
+
   const headers = await getInternalHeaders();
   const start = Date.now();
 

@@ -43,10 +43,21 @@ describe("SaaS key + quota gate", () => {
     expect(row.key).toBe(hashKey(key.key));
     expect(row.key).not.toBe(key.key);
 
-    // Listing must never hand the plaintext back out.
+    // Listing must never hand the plaintext back out (re-display goes
+    // through the owned POST /api/keys/[id]/reveal endpoint instead).
     const listed = await getApiKeys(user.id);
     expect(listed[0].key).toBeNull();
     expect(listed[0].keyPrefix).toBe(key.key.slice(0, 12));
+  });
+
+  it("re-displays the plaintext to its owner via revealApiKey", async () => {
+    const { revealApiKey } = await import("@/lib/db/repos/apiKeysRepo.js");
+    const user = await userWithPlan("a2@example.com");
+    const key = await createApiKey("app", null, user.id);
+
+    expect(await revealApiKey(key.id, user.id)).toBe(key.key);
+    // Cross-tenant reveal reads as nothing.
+    expect(await revealApiKey(key.id, "someone-else")).toBeNull();
   });
 
   it("authorizes a fresh key and refuses an unknown one", async () => {

@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -85,6 +85,9 @@ export const TABLES = {
       machineId: "TEXT",
       userId: "TEXT",
       keyPrefix: "TEXT",
+      // AES-GCM ciphertext of the SaaS plaintext key, for owner re-display.
+      // NULL for legacy rows. Never leaks: repo surfaces hasEncrypted only.
+      keyEncrypted: "TEXT",
       lastUsedAt: "TEXT",
       isActive: "INTEGER DEFAULT 1",
       createdAt: "TEXT NOT NULL",
