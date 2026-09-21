@@ -42,6 +42,7 @@ describe("cached-token end-to-end (persist + aggregate + cost)", () => {
       connectionId: "c-cache",
       tokens: canonical,
       endpoint: "/v1/messages",
+      source: "203.0.113.9",
       status: "ok",
     });
 
@@ -49,6 +50,7 @@ describe("cached-token end-to-end (persist + aggregate + cost)", () => {
     expect(stats.totalCachedTokens).toBe(200);
     expect(stats.totalPromptTokens).toBe(330);
     expect(stats.byProvider.anthropic.cachedTokens).toBe(200);
+    expect(stats.bySource["203.0.113.9"]).toMatchObject({ source: "203.0.113.9", requests: 1 });
 
     // Cost: nonCached=330-200-30=100 @3 + cached 200 @0.30 + creation 30 @3.75 + output 50 @15
     const expected = (100 * 3 + 200 * 0.3 + 30 * 3.75 + 50 * 15) / 1_000_000;

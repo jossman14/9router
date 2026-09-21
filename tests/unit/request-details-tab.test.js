@@ -22,7 +22,7 @@ beforeAll(async () => {
   vi.resetModules();
   db = await import("@/lib/db/index.js");
   await db.initDb();
-  await db.updateSettings({ enableObservability2: true, observabilityBatchSize: 1 });
+  await db.updateSettings({ enableObservability: true, observabilityBatchSize: 1, observabilityMaxJsonSize: 256 });
 
   const { getAdapter } = await import("@/lib/db/driver.js");
   adapter = await getAdapter();
@@ -82,7 +82,7 @@ describe("request details — tab crash-risk cases", () => {
     expect(res.pagination.pageSize).toBe(9999);
   });
 
-  it("oversized field → stored truncated + reparseable (no circular)", async () => {
+  it("payload below 256 KiB → stored whole and reparseable (no circular)", async () => {
     const huge = "x".repeat(20 * 1024);
     await saveDetail({
       id: "trunc-1", provider: "openai", model: "gpt-4",
@@ -94,7 +94,79 @@ describe("request details — tab crash-risk cases", () => {
     expect(got).toBeDefined();
     // Truncated field is a plain object safe for JSON.stringify in the drawer
     expect(() => JSON.stringify(got)).not.toThrow();
+    expect(got.request.blob).toBe(huge);
+  });
+
+  it("truncates multibyte payloads by UTF-8 bytes", async () => {
+    const multibyte = "é".repeat(140 * 1024);
+    expect(multibyte.length).toBeLessThan(256 * 1024);
+    expect(Buffer.byteLength(multibyte)).toBeGreaterThan(256 * 1024);
+
+    await saveDetail({
+      id: "trunc-utf8", provider: "openai", model: "gpt-4", status: "ok",
+      request: { blob: multibyte }, response: { content: "ok" },
+    });
+
+    const got = await db.getRequestDetailById("trunc-utf8");
     expect(got.request._truncated).toBe(true);
+    expect(got.request._originalSize).toBeGreaterThan(256 * 1024);
+  });
+
+  it("persists origin metadata, sanitizes both header sets, truncates at 256 KiB, and removes expired details", async () => {
+    const huge = "x".repeat(300 * 1024);
+    adapter.run(
+      `INSERT INTO requestDetails(id, timestamp, provider, model, connectionId, status, data) VALUES(?, ?, ?, ?, ?, ?, ?)`,
+      ["expired-1", new Date(Date.now() - 8 * 86400000).toISOString(), "old", "m", null, "ok", "{}"]
+    );
+
+    await saveDetail({
+      id: "origin-1", provider: "openai", model: "gpt-4", status: "ok",
+      source: "203.0.113.9", clientIp: "203.0.113.9", userAgent: "test-client", method: "POST",
+      clientHeaders: { authorization: "Bearer secret", "x-request-id": "r1" },
+      providerHeaders: { "set-cookie": "session=secret", "content-type": "application/json" },
+      providerRequest: {
+        headers: {
+          authorization: "Bearer provider-secret",
+          "x-request-id": "provider-request-1",
+          "x-9r-peer-token": "must-not-persist",
+          "x-9r-cli-token": "must-not-persist",
+        },
+        body: { input: "hello" },
+      },
+      providerResponse: {
+        headers: {
+          "set-cookie": "provider=session-secret",
+          "content-type": "application/json",
+          "x-request-id": "provider-response-1",
+        },
+        body: { output: "world" },
+      },
+      payloadSizes: { request: huge.length }, request: { blob: huge }, response: { content: "ok" },
+    });
+
+    const got = await db.getRequestDetailById("origin-1");
+    expect(got).toMatchObject({ source: "203.0.113.9", clientIp: "203.0.113.9", userAgent: "test-client", method: "POST" });
+    expect(got.clientHeaders).toEqual({ authorization: "[REDACTED]", "x-request-id": "r1" });
+    expect(got.providerHeaders).toEqual({ "set-cookie": "[REDACTED]", "content-type": "application/json" });
+    expect(got.providerRequest).toEqual({
+      headers: {
+        authorization: "[REDACTED]",
+        "x-request-id": "provider-request-1",
+      },
+      body: { input: "hello" },
+    });
+    expect(got.providerResponse).toEqual({
+      headers: {
+        "set-cookie": "[REDACTED]",
+        "content-type": "application/json",
+        "x-request-id": "provider-response-1",
+      },
+      body: { output: "world" },
+    });
+    expect(got.payloadSizes.request).toBe(huge.length);
+    expect(got.request._truncated).toBe(true);
+    expect(got.request._originalSize).toBeGreaterThan(256 * 1024);
+    expect(await db.getRequestDetailById("expired-1")).toBeNull();
   });
 
   it("missing tokens/timestamp on row → getInputTokens-style access safe", async () => {

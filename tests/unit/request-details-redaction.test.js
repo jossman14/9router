@@ -2,10 +2,19 @@ import { describe, it, expect } from "vitest";
 
 // Mirror the redaction logic from src/app/api/usage/request-details/route.js
 // so we can test it in isolation.
+const PRIVATE_DETAIL_FIELDS = [
+  "clientHeaders",
+  "providerHeaders",
+  "request",
+  "providerRequest",
+  "providerResponse",
+  "response",
+];
+
 function redactDetails(details) {
   return (details || []).map((d) => {
     const redacted = { ...d };
-    for (const key of ["request", "providerRequest", "providerResponse", "response"]) {
+    for (const key of PRIVATE_DETAIL_FIELDS) {
       if (redacted[key] !== undefined) {
         redacted[key] = { redacted: true };
       }
@@ -37,6 +46,17 @@ describe("request-details redaction", () => {
     expect(out.providerRequest).toEqual({ redacted: true });
     expect(out.providerResponse).toEqual({ redacted: true });
     expect(out.response).toEqual({ redacted: true });
+  });
+
+  it("redacts client and provider header maps", () => {
+    const details = [{
+      id: "hdr-1",
+      clientHeaders: { authorization: "Bearer secret", "x-request-id": "r1" },
+      providerHeaders: { "set-cookie": "session=secret", "content-type": "application/json" },
+    }];
+    const out = redactDetails(details)[0];
+    expect(out.clientHeaders).toEqual({ redacted: true });
+    expect(out.providerHeaders).toEqual({ redacted: true });
   });
 
   it("handles empty details", () => {

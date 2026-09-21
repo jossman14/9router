@@ -35,12 +35,15 @@ function buildTargetUrl(base, path, search) {
   return target;
 }
 
-function forwardedHeaders(request, target) {
+function forwardedHeaders(request, target, path) {
   const headers = new Headers(request.headers);
   for (const header of headers.keys()) {
     if (HOP_BY_HOP_HEADERS.has(header.toLowerCase())) headers.delete(header);
   }
   headers.delete("host");
+  if (request.method === "POST" && (path.join("/") === "settings" || path.join("/") === "settings/apply")) {
+    headers.set("origin", target.origin);
+  }
   // Never leak viewer credentials to a non-loopback Headroom host
   if (!LOOPBACK_HOSTS.has(target.hostname.replace(/^\[|\]$/g, "").toLowerCase())) {
     headers.delete("cookie");
@@ -50,10 +53,14 @@ function forwardedHeaders(request, target) {
 }
 
 function rewriteDashboardHtml(html) {
-  return html.replace(
-    /fetch\('(?=\/(?:stats|health|stats-history|transformations\/feed))/g,
-    `fetch('${DASHBOARD_PREFIX}`,
-  );
+  return html
+    .replace(/(src|href)=["']\/(dashboard\/static\/)/g, `$1="${DASHBOARD_PREFIX}/$2`)
+    .replace(/href=["']\/dashboard\/settings["']/g, `href="${DASHBOARD_PREFIX}/dashboard/settings"`)
+    .replace(/href=["']\/dashboard["']/g, `href="${DASHBOARD_PREFIX}/dashboard"`)
+    .replace(
+      /fetch\('(?=\/(?:stats|health|stats-history|transformations\/feed|settings(?:\/schema|\/apply)?))/g,
+      `fetch('${DASHBOARD_PREFIX}`,
+    );
 }
 
 async function proxy(request, { params }) {
@@ -67,7 +74,7 @@ async function proxy(request, { params }) {
 
     const response = await fetch(target, {
       method,
-      headers: forwardedHeaders(request, target),
+      headers: forwardedHeaders(request, target, path),
       body: hasBody ? request.body : undefined,
       duplex: hasBody ? "half" : undefined,
       redirect: "manual",
@@ -78,7 +85,7 @@ async function proxy(request, { params }) {
       if (HOP_BY_HOP_HEADERS.has(header.toLowerCase())) headers.delete(header);
     }
 
-    if (path.join("/") === "dashboard") {
+    if (["dashboard", "dashboard/settings"].includes(path.join("/"))) {
       const contentType = response.headers.get("content-type") || "";
       if (contentType.includes("text/html")) {
         headers.delete("content-length");

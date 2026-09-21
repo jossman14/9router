@@ -6,6 +6,7 @@ import Button from "@/shared/components/Button";
 import Drawer from "@/shared/components/Drawer";
 import Pagination from "@/shared/components/Pagination";
 import { cn } from "@/shared/utils/cn";
+import { formatWibTimestamp } from "@/shared/utils/usagePresentation";
 import { AI_PROVIDERS, getProviderByAlias } from "@/shared/constants/providers";
 
 let providerNameCache = null;
@@ -99,6 +100,25 @@ function getInputTokens(tokens) {
   return prompt < cache ? cache : prompt;
 }
 
+function isRedacted(value) {
+  return value?.redacted === true;
+}
+
+function formatPayloadSize(value) {
+  if (typeof value !== "number") return "—";
+  return `${value.toLocaleString()} B`;
+}
+
+function MetadataValue({ value }) {
+  return isRedacted(value) ? (
+    <span className="text-amber-600">[REDACTED]</span>
+  ) : (
+    <pre className="max-h-[240px] max-w-full overflow-auto whitespace-pre-wrap break-words rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5">
+      {JSON.stringify(value, null, 2)}
+    </pre>
+  );
+}
+
 export default function RequestDetailsTab() {
   const [details, setDetails] = useState([]);
   const [pagination, setPagination] = useState({
@@ -155,10 +175,14 @@ export default function RequestDetailsTab() {
   }, [pagination.page, pagination.pageSize, filters]);
 
   useEffect(() => {
+    // Fetch callbacks update state asynchronously after the request resolves.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchProviders();
   }, [fetchProviders]);
 
   useEffect(() => {
+    // Fetch callbacks update state asynchronously after the request resolves.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchDetails();
   }, [fetchDetails]);
 
@@ -253,6 +277,7 @@ export default function RequestDetailsTab() {
             <thead>
               <tr className="border-b border-black/5 dark:border-white/5">
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Timestamp</th>
+                <th className="text-left p-4 text-sm font-semibold text-text-main">Source / IP</th>
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Model</th>
                 <th className="text-left p-4 text-sm font-semibold text-text-main">Provider</th>
                 <th className="text-right p-4 text-sm font-semibold text-text-main">Input Tokens</th>
@@ -266,7 +291,7 @@ export default function RequestDetailsTab() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="7" className="p-8 text-center text-text-muted">
+                  <td colSpan="10" className="p-8 text-center text-text-muted">
                     <div className="flex items-center justify-center gap-2">
                       <span className="material-symbols-outlined animate-spin text-[20px]">progress_activity</span>
                       Loading...
@@ -275,7 +300,7 @@ export default function RequestDetailsTab() {
                 </tr>
               ) : details.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="p-8 text-center text-text-muted">
+                  <td colSpan="10" className="p-8 text-center text-text-muted">
                     No request details found
                   </td>
                 </tr>
@@ -286,7 +311,13 @@ export default function RequestDetailsTab() {
                     className="border-b border-black/5 dark:border-white/5 last:border-b-0 hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors"
                   >
                     <td className="whitespace-nowrap p-4 text-sm text-text-main">
-                      {new Date(detail.timestamp).toLocaleString()}
+                      {formatWibTimestamp(detail.timestamp)}
+                    </td>
+                    <td className="max-w-[180px] truncate p-4 text-sm text-text-main">
+                      <div className="font-medium" title={detail.source || detail.clientIp || "local"}>{detail.source || detail.clientIp || "local"}</div>
+                      {detail.clientIp && detail.clientIp !== detail.source && (
+                        <div className="text-xs text-text-muted" title={detail.clientIp}>{detail.clientIp}</div>
+                      )}
                     </td>
                     <td className="max-w-[260px] truncate p-4 font-mono text-sm text-text-main">
                       {detail.model}
@@ -358,7 +389,7 @@ export default function RequestDetailsTab() {
               </div>
               <div>
                 <span className="text-text-muted">Timestamp:</span>{" "}
-                <span className="text-text-main">{new Date(selectedDetail.timestamp).toLocaleString()}</span>
+                <span className="text-text-main">{formatWibTimestamp(selectedDetail.timestamp)}</span>
               </div>
               <div>
                  <span className="text-text-muted">Provider:</span>{" "}
@@ -367,6 +398,22 @@ export default function RequestDetailsTab() {
               <div>
                 <span className="text-text-muted">Model:</span>{" "}
                 <span className="text-text-main font-mono">{selectedDetail.model}</span>
+              </div>
+              <div>
+                <span className="text-text-muted">Source:</span>{" "}
+                <span className="text-text-main font-mono break-all">{selectedDetail.source || "local"}</span>
+              </div>
+              <div>
+                <span className="text-text-muted">Client IP:</span>{" "}
+                <span className="text-text-main font-mono break-all">{selectedDetail.clientIp || "—"}</span>
+              </div>
+              <div>
+                <span className="text-text-muted">Method:</span>{" "}
+                <span className="text-text-main font-mono">{selectedDetail.method || "POST"}</span>
+              </div>
+              <div>
+                <span className="text-text-muted">User-Agent:</span>{" "}
+                <span className="text-text-main break-all">{selectedDetail.userAgent || "—"}</span>
               </div>
               <div>
                 <span className="text-text-muted">Status:</span>{" "}
@@ -413,6 +460,23 @@ export default function RequestDetailsTab() {
               </div>
             </div>
 
+            {selectedDetail.payloadSizes && Object.keys(selectedDetail.payloadSizes).length > 0 && (
+              <div className="rounded-lg border border-black/5 dark:border-white/5 p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="material-symbols-outlined text-[18px] text-text-muted">data_usage</span>
+                  <span className="font-semibold text-sm text-text-main">Payload Sizes</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+                  {Object.entries(selectedDetail.payloadSizes).map(([key, value]) => (
+                    <div key={key}>
+                      <span className="text-text-muted block text-xs capitalize">{key}</span>
+                      <span className="font-mono">{formatPayloadSize(value)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {selectedDetail.pxpipe && (
               <div className="rounded-lg border border-black/5 dark:border-white/5 p-4">
                 <div className="flex items-center gap-2 mb-2">
@@ -456,50 +520,66 @@ export default function RequestDetailsTab() {
             )}
 
             <div className="space-y-4">
+              {(isRedacted(selectedDetail.clientHeaders) ||
+                isRedacted(selectedDetail.providerHeaders) ||
+                isRedacted(selectedDetail.request) ||
+                isRedacted(selectedDetail.providerRequest) ||
+                isRedacted(selectedDetail.providerResponse) ||
+                isRedacted(selectedDetail.response)) && (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+                  Header dan payload lengkap hanya tersedia dari localhost atau dengan CLI token yang valid.
+                </div>
+              )}
+
+              <CollapsibleSection title="Client Headers" icon="http">
+                <MetadataValue value={selectedDetail.clientHeaders || {}} />
+              </CollapsibleSection>
+
+              <CollapsibleSection title="Provider Headers" icon="dns">
+                <MetadataValue value={selectedDetail.providerHeaders || {}} />
+              </CollapsibleSection>
+
               <CollapsibleSection title="1. Client Request (Input)" defaultOpen={true} icon="input">
-                <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
-                  {JSON.stringify(selectedDetail.request, null, 2)}
-                </pre>
+                <MetadataValue value={selectedDetail.request} />
               </CollapsibleSection>
 
               {selectedDetail.providerRequest && (
                 <CollapsibleSection title="2. Provider Request (Translated)" icon="translate">
-                  <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
-                    {JSON.stringify(selectedDetail.providerRequest, null, 2)}
-                  </pre>
+                  <MetadataValue value={selectedDetail.providerRequest} />
                 </CollapsibleSection>
               )}
 
               {selectedDetail.providerResponse && (
                 <CollapsibleSection title="3. Provider Response (Raw)" icon="data_object">
-                  <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
-                    {typeof selectedDetail.providerResponse === 'object'
-                      ? JSON.stringify(selectedDetail.providerResponse, null, 2)
-                      : selectedDetail.providerResponse
-                    }
-                  </pre>
+                  <MetadataValue value={selectedDetail.providerResponse} />
                 </CollapsibleSection>
               )}
-              
+
               <CollapsibleSection title="4. Client Response (Final)" defaultOpen={true} icon="output">
-                {selectedDetail.response?.thinking && (
-                  <div className="mb-4">
-                    <h4 className="font-semibold text-text-main mb-2 flex items-center gap-2 text-xs uppercase tracking-wide opacity-70">
-                      <span className="material-symbols-outlined text-[16px]">psychology</span>
-                      Thinking Process
+                {isRedacted(selectedDetail.response) ? (
+                  <MetadataValue value={selectedDetail.response} />
+                ) : (
+                  <>
+                    {selectedDetail.response?.thinking && (
+                      <div className="mb-4">
+                        <h4 className="font-semibold text-text-main mb-2 flex items-center gap-2 text-xs uppercase tracking-wide opacity-70">
+                          <span className="material-symbols-outlined text-[16px]">psychology</span>
+                          Thinking Process
+                        </h4>
+                        <pre className="max-h-[200px] max-w-full overflow-auto rounded-lg border border-amber-200 bg-amber-50 p-3 font-mono text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100 sm:p-4">
+                          {selectedDetail.response.thinking}
+                        </pre>
+                      </div>
+                    )}
+
+                    <h4 className="font-semibold text-text-main mb-2 text-xs uppercase tracking-wide opacity-70">
+                      Content
                     </h4>
-                    <pre className="max-h-[200px] max-w-full overflow-auto rounded-lg border border-amber-200 bg-amber-50 p-3 font-mono text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100 sm:p-4">
-                      {selectedDetail.response.thinking}
+                    <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
+                      {selectedDetail.response?.content || "[No content]"}
                     </pre>
-                  </div>
+                  </>
                 )}
-                
-                <h4 className="font-semibold text-text-main mb-2 text-xs uppercase tracking-wide opacity-70">
-                  Content
-                </h4>
-                <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
-                  {selectedDetail.response?.content || "[No content]"}
-                </pre>
               </CollapsibleSection>
             </div>
           </div>

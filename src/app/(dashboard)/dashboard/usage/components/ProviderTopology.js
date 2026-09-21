@@ -13,6 +13,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
 import { getProviderIconSrc, markProviderIconMissing } from "@/shared/utils/providerIcon";
+import { getProviderRequestCount } from "@/shared/utils/usagePresentation";
 
 // Force-stop FE animation if a provider stays active longer than this
 const FE_ACTIVE_TIMEOUT_MS = 60000;
@@ -72,12 +73,15 @@ function ProviderNode({ data }) {
       </div>
 
       {/* Provider name */}
-      <span
-        className="text-base font-medium truncate"
-        style={{ color: active ? color : "var(--color-text)" }}
-      >
-        {label}
-      </span>
+      <div className="min-w-0">
+        <span
+          className="block max-w-[110px] truncate text-sm font-medium"
+          style={{ color: active ? color : "var(--color-text)" }}
+        >
+          {label}
+        </span>
+        <span className="block text-[10px] text-text-muted">{data.requestCount || 0} requests</span>
+      </div>
 
       {/* Active indicator */}
       {active && (
@@ -260,7 +264,7 @@ const nodeTypes = { provider: ProviderNode, router: RouterNode };
 const edgeTypes = { topology: TopologyEdge };
 
 // Place N nodes evenly along an ellipse around the router center.
-function buildLayout(providers, activeSet, lastSet, errorSet) {
+function buildLayout(providers, activeSet, lastSet, errorSet, requestCounts) {
   const nodeW = 180;
   const nodeH = 30;
   const routerW = 120;
@@ -309,6 +313,7 @@ function buildLayout(providers, activeSet, lastSet, errorSet) {
       color: config.color || "#6b7280",
       imageUrl: getProviderImageUrl(p.provider),
       textIcon: config.textIcon || (p.provider || "?").slice(0, 2).toUpperCase(),
+      requestCount: getProviderRequestCount(requestCounts, p.provider),
       active,
     };
 
@@ -354,7 +359,13 @@ function buildLayout(providers, activeSet, lastSet, errorSet) {
   return { nodes, edges };
 }
 
-export default function ProviderTopology({ providers = [], activeRequests = [], lastProvider = "", errorProvider = "" }) {
+export default function ProviderTopology({
+  providers = [],
+  activeRequests = [],
+  lastProvider = "",
+  errorProvider = "",
+  requestCounts = {},
+}) {
   // Serialize to stable string keys so useMemo only re-runs when values actually change
   const activeKey = useMemo(
     () => activeRequests.map((r) => r.provider?.toLowerCase()).filter(Boolean).sort().join(","),
@@ -399,8 +410,8 @@ export default function ProviderTopology({ providers = [], activeRequests = [], 
   }, [rawActiveSet, tick]);
 
   const { nodes, edges } = useMemo(
-    () => buildLayout(providers, activeSet, lastSet, errorSet),
-    [providers, activeSet, lastSet, errorSet]
+    () => buildLayout(providers, activeSet, lastSet, errorSet, requestCounts),
+    [providers, activeSet, lastSet, errorSet, requestCounts]
   );
 
   // Stable key — only remount when provider list changes
@@ -484,4 +495,7 @@ ProviderTopology.propTypes = {
   })),
   lastProvider: PropTypes.string,
   errorProvider: PropTypes.string,
+  requestCounts: PropTypes.objectOf(PropTypes.shape({
+    requests: PropTypes.number,
+  })),
 };

@@ -46,6 +46,7 @@ export async function handleChat(request, clientRawRequest = null) {
     const url = new URL(request.url);
     clientRawRequest = {
       endpoint: url.pathname,
+      method: request.method || "POST",
       body,
       headers: Object.fromEntries(request.headers.entries())
     };

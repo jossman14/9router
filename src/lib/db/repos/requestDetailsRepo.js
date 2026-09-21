@@ -4,7 +4,8 @@ import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 const DEFAULT_MAX_RECORDS = 200;
 const DEFAULT_BATCH_SIZE = 20;
 const DEFAULT_FLUSH_INTERVAL_MS = 5000;
-const DEFAULT_MAX_JSON_SIZE = 5 * 1024;
+const DEFAULT_MAX_JSON_SIZE = 256 * 1024;
+const MAX_JSON_SIZE = 256 * 1024;
 const CONFIG_CACHE_TTL_MS = 5000;
 
 let cachedConfig = null;
@@ -23,7 +24,7 @@ async function getObservabilityConfig() {
         maxRecords: settings.observabilityMaxRecords || parseInt(process.env.OBSERVABILITY_MAX_RECORDS || String(DEFAULT_MAX_RECORDS), 10),
         batchSize: settings.observabilityBatchSize || parseInt(process.env.OBSERVABILITY_BATCH_SIZE || String(DEFAULT_BATCH_SIZE), 10),
         flushIntervalMs: settings.observabilityFlushIntervalMs || parseInt(process.env.OBSERVABILITY_FLUSH_INTERVAL_MS || String(DEFAULT_FLUSH_INTERVAL_MS), 10),
-        maxJsonSize: (settings.observabilityMaxJsonSize || parseInt(process.env.OBSERVABILITY_MAX_JSON_SIZE || "5", 10)) * 1024,
+        maxJsonSize: Math.min(MAX_JSON_SIZE, (settings.observabilityMaxJsonSize || parseInt(process.env.OBSERVABILITY_MAX_JSON_SIZE || "256", 10)) * 1024),
       };
       cachedConfigTs = Date.now();
       return cachedConfig;
@@ -39,7 +40,7 @@ async function getObservabilityConfig() {
       maxRecords: settings.observabilityMaxRecords || parseInt(process.env.OBSERVABILITY_MAX_RECORDS || String(DEFAULT_MAX_RECORDS), 10),
       batchSize: settings.observabilityBatchSize || parseInt(process.env.OBSERVABILITY_BATCH_SIZE || String(DEFAULT_BATCH_SIZE), 10),
       flushIntervalMs: settings.observabilityFlushIntervalMs || parseInt(process.env.OBSERVABILITY_FLUSH_INTERVAL_MS || String(DEFAULT_FLUSH_INTERVAL_MS), 10),
-      maxJsonSize: (settings.observabilityMaxJsonSize || parseInt(process.env.OBSERVABILITY_MAX_JSON_SIZE || "5", 10)) * 1024,
+      maxJsonSize: Math.min(MAX_JSON_SIZE, (settings.observabilityMaxJsonSize || parseInt(process.env.OBSERVABILITY_MAX_JSON_SIZE || "256", 10)) * 1024),
     };
   } catch {
     cachedConfig = {
@@ -60,15 +61,38 @@ let isFlushing = false;
 
 function sanitizeHeaders(headers) {
   if (!headers || typeof headers !== "object") return {};
-  const sensitiveKeys = ["authorization", "x-api-key", "cookie", "token", "api-key"];
-  const sanitized = { ...headers };
-  for (const key of Object.keys(sanitized)) {
-    if (sensitiveKeys.some((s) => key.toLowerCase().includes(s))) delete sanitized[key];
+  const sanitized = {};
+  for (const [key, value] of Object.entries(headers)) {
+    const normalized = key.toLowerCase();
+    if (normalized === "x-9r-peer-token" || normalized === "x-9r-cli-token") continue;
+    const isSensitive = normalized === "authorization"
+      || normalized === "proxy-authorization"
+      || normalized === "cookie"
+      || normalized === "set-cookie"
+      || normalized.includes("api-key")
+      || normalized.includes("apikey")
+      || normalized.includes("token")
+      || normalized.includes("secret");
+    if (isSensitive) sanitized[key] = "[REDACTED]";
+    else if (value && typeof value === "object" && !Array.isArray(value)) sanitized[key] = sanitizeHeaders(value);
+    else sanitized[key] = value;
   }
   return sanitized;
 }
 
-export const __test__ = { sanitizeHeaders };
+function sanitizePayloadHeaders(value) {
+  if (Array.isArray(value)) return value.map(sanitizePayloadHeaders);
+  if (!value || typeof value !== "object") return value;
+  const sanitized = {};
+  for (const [key, child] of Object.entries(value)) {
+    sanitized[key] = key.toLowerCase() === "headers"
+      ? sanitizeHeaders(child)
+      : sanitizePayloadHeaders(child);
+  }
+  return sanitized;
+}
+
+export const __test__ = { sanitizeHeaders, sanitizePayloadHeaders };
 
 function generateDetailId(model) {
   const timestamp = new Date().toISOString();
@@ -79,8 +103,9 @@ function generateDetailId(model) {
 
 function truncateField(obj, maxSize) {
   const str = JSON.stringify(obj || {});
-  if (str.length > maxSize) {
-    return { _truncated: true, _originalSize: str.length, _preview: str.substring(0, 200) };
+  const byteSize = Buffer.byteLength(str, "utf8");
+  if (byteSize > maxSize) {
+    return { _truncated: true, _originalSize: byteSize, _preview: str.substring(0, 200) };
   }
   return obj || {};
 }
@@ -111,10 +136,17 @@ async function flushToDatabase() {
             status: item.status || null,
             latency: item.latency || {},
             tokens: item.tokens || {},
-            request: truncateField(item.request, config.maxJsonSize),
-            providerRequest: truncateField(item.providerRequest, config.maxJsonSize),
-            providerResponse: truncateField(item.providerResponse, config.maxJsonSize),
-            response: truncateField(item.response, config.maxJsonSize),
+            source: item.source || "local",
+            clientIp: item.clientIp || null,
+            userAgent: item.userAgent || null,
+            method: item.method || null,
+            clientHeaders: sanitizeHeaders(item.clientHeaders || item.request?.headers),
+            providerHeaders: sanitizeHeaders(item.providerHeaders),
+            payloadSizes: item.payloadSizes || {},
+            request: truncateField(sanitizePayloadHeaders(item.request), config.maxJsonSize),
+            providerRequest: truncateField(sanitizePayloadHeaders(item.providerRequest), config.maxJsonSize),
+            providerResponse: truncateField(sanitizePayloadHeaders(item.providerResponse), config.maxJsonSize),
+            response: truncateField(sanitizePayloadHeaders(item.response), config.maxJsonSize),
             pxpipe: item.pxpipe || undefined,
           };
 
@@ -123,6 +155,9 @@ async function flushToDatabase() {
             [record.id, record.timestamp, record.provider, record.model, record.connectionId, record.status, stringifyJson(record)]
           );
         }
+
+        const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        db.run(`DELETE FROM requestDetails WHERE timestamp < ?`, [cutoff]);
 
         const cnt = db.get(`SELECT COUNT(*) as c FROM requestDetails`);
         if (cnt && cnt.c > config.maxRecords) {

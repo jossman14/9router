@@ -116,8 +116,55 @@ const LOCAL_ONLY_PATHS = [
   "/api/auth/reset-password",
   "/api/headroom/start",
   "/api/headroom/stop",
-  "/api/headroom/proxy",
+  "/api/headroom/restart",
+  "/api/headroom/extras",
 ];
+
+// Read-only Headroom dashboard telemetry the dashboard HTML itself polls
+// (see rewriteDashboardHtml in the proxy route). GET/HEAD only — any other
+// method, or any other /api/headroom/proxy path, stays local-only below.
+const HEADROOM_DASHBOARD_PATH = "/api/headroom/proxy/dashboard";
+const HEADROOM_PROXY_PREFIX = "/api/headroom/proxy";
+const HEADROOM_DASHBOARD_READ_PATHS = new Set([
+  HEADROOM_DASHBOARD_PATH,
+  `${HEADROOM_PROXY_PREFIX}/health`,
+  `${HEADROOM_PROXY_PREFIX}/stats`,
+  `${HEADROOM_PROXY_PREFIX}/stats-lifetime`,
+  `${HEADROOM_PROXY_PREFIX}/stats-history`,
+  `${HEADROOM_PROXY_PREFIX}/subscription-window`,
+  `${HEADROOM_PROXY_PREFIX}/transformations/feed`,
+  `${HEADROOM_PROXY_PREFIX}/settings`,
+  `${HEADROOM_PROXY_PREFIX}/settings/schema`,
+  `${HEADROOM_PROXY_PREFIX}/settings/apply`,
+  `${HEADROOM_PROXY_PREFIX}/dashboard/settings`,
+  `${HEADROOM_DASHBOARD_PATH}/static/tailwind.min.js`,
+  `${HEADROOM_DASHBOARD_PATH}/static/htmx.min.js`,
+  `${HEADROOM_DASHBOARD_PATH}/static/alpine.min.js`,
+]);
+
+const HEADROOM_SETTINGS_WRITE_PATHS = new Set([
+  `${HEADROOM_PROXY_PREFIX}/settings`,
+  `${HEADROOM_PROXY_PREFIX}/settings/apply`,
+]);
+
+function isSameOriginRequest(request) {
+  const origin = request.headers.get("origin");
+  if (!origin) return false;
+  try {
+    const protocol = request.headers.get("x-forwarded-proto") || "https";
+    return new URL(origin).origin === `${protocol}://${request.headers.get("host")}`;
+  } catch {
+    return false;
+  }
+}
+
+function isHeadroomDashboardReadRoute(request, pathname) {
+  const method = (request.method || "GET").toUpperCase();
+  if (HEADROOM_SETTINGS_WRITE_PATHS.has(pathname) && method !== "GET" && method !== "HEAD") {
+    return method === "POST" && isSameOriginRequest(request);
+  }
+  return (method === "GET" || method === "HEAD") && HEADROOM_DASHBOARD_READ_PATHS.has(pathname);
+}
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
@@ -228,21 +275,37 @@ function isPublicApi(pathname) {
   return PUBLIC_API_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
+export async function canAccessDetailPayloads(request) {
+  return isLocalRequest(request) || await hasValidCliToken(request);
+}
+
 export const __test__ = {
   isLocalRequest,
   isPublicLlmApi,
   extractApiKey,
   canAccessPublicLlmApi,
   canAccessLocalOnlyRoute,
+  canAccessDetailPayloads,
 };
 
 export async function proxy(request) {
   const { pathname } = request.nextUrl;
 
-  // Local-only gate for spawn-capable / host-secret routes.
-  if (LOCAL_ONLY_PATHS.some((p) => pathname.startsWith(p))) {
+  const isHeadroomDashboardRead = isHeadroomDashboardReadRoute(request, pathname);
+
+  // Keep every Headroom route local-only except the authenticated, read-only
+  // dashboard HTML and telemetry allowlist above.
+  if (pathname.startsWith(HEADROOM_PROXY_PREFIX) && !isHeadroomDashboardRead) {
     if (!(await canAccessLocalOnlyRoute(request))) {
       return NextResponse.json({ error: "Local only: CLI token required" }, { status: 403 });
+    }
+  } else if (LOCAL_ONLY_PATHS.some((p) => pathname.startsWith(p))) {
+    if (!(await canAccessLocalOnlyRoute(request))) {
+      return NextResponse.json({ error: "Local only: CLI token required" }, { status: 403 });
+    }
+  } else if (isHeadroomDashboardRead && !isLoopbackHostname(request.headers.get("host"))) {
+    if (!(await hasValidCliToken(request)) && !(await isAuthenticated(request))) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
   }
 

@@ -37,13 +37,14 @@ const { proxy, __test__ } = await import("../../src/dashboardGuard.js");
 
 const PEER_TOKEN = "peer-token-fixture";
 
-function request(pathname, headers = {}) {
+function request(pathname, headers = {}, options = {}) {
   const normalizedHeaders = new Headers(headers);
   return {
     nextUrl: { pathname, searchParams: new URL(`http://localhost${pathname}`).searchParams },
     headers: normalizedHeaders,
-    cookies: { get: vi.fn(() => undefined) },
+    cookies: { get: vi.fn((name) => options.cookies?.[name] ? { value: options.cookies[name] } : undefined) },
     url: `http://localhost${pathname}`,
+    method: options.method || "GET",
   };
 }
 
@@ -285,9 +286,143 @@ describe("dashboard guard local-only access", () => {
 
     expect(response).toBe(mocks.nextResponse);
   });
+
+  it("rejects remote Headroom restart with an authenticated dashboard session", async () => {
+    mocks.verifyDashboardAuthToken.mockResolvedValue(true);
+
+    const response = await proxy(request("/api/headroom/restart", {
+      host: "9router.nusawangsa.com",
+    }, { cookies: { auth_token: "valid-session" }, method: "POST" }));
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe("Local only: CLI token required");
+  });
+
+  it("rejects remote Headroom extra installation with an authenticated dashboard session", async () => {
+    mocks.verifyDashboardAuthToken.mockResolvedValue(true);
+
+    const response = await proxy(request("/api/headroom/extras", {
+      host: "9router.nusawangsa.com",
+    }, { cookies: { auth_token: "valid-session" }, method: "POST" }));
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe("Local only: CLI token required");
+  });
+
+  it("allows authenticated remote Headroom dashboard route", async () => {
+    mocks.verifyDashboardAuthToken.mockResolvedValue(true);
+
+    const response = await proxy(request("/api/headroom/proxy/dashboard", {
+      host: "9router.nusawangsa.com",
+    }, { cookies: { auth_token: "valid-session" } }));
+
+    expect(response).toBe(mocks.nextResponse);
+  });
+
+  it("allows authenticated remote Headroom settings read", async () => {
+    mocks.verifyDashboardAuthToken.mockResolvedValue(true);
+
+    const response = await proxy(request("/api/headroom/proxy/settings", {
+      host: "9router.nusawangsa.com",
+    }, { cookies: { auth_token: "valid-session" }, method: "GET" }));
+
+    expect(response).toBe(mocks.nextResponse);
+  });
+
+  it("allows authenticated remote Headroom telemetry route", async () => {
+    mocks.verifyDashboardAuthToken.mockResolvedValue(true);
+
+    const response = await proxy(request("/api/headroom/proxy/stats", {
+      host: "9router.nusawangsa.com",
+    }, { cookies: { auth_token: "valid-session" } }));
+
+    expect(response).toBe(mocks.nextResponse);
+  });
+
+  it("allows authenticated remote Headroom dashboard static asset", async () => {
+    mocks.verifyDashboardAuthToken.mockResolvedValue(true);
+
+    const response = await proxy(request("/api/headroom/proxy/dashboard/static/tailwind.min.js", {
+      host: "9router.nusawangsa.com",
+    }, { cookies: { auth_token: "valid-session" } }));
+
+    expect(response).toBe(mocks.nextResponse);
+  });
+
+  it("rejects authenticated remote unknown Headroom dashboard static path", async () => {
+    mocks.verifyDashboardAuthToken.mockResolvedValue(true);
+
+    const response = await proxy(request("/api/headroom/proxy/dashboard/static/export", {
+      host: "9router.nusawangsa.com",
+    }, { cookies: { auth_token: "valid-session" } }));
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe("Local only: CLI token required");
+  });
+
+  it("rejects authenticated remote Headroom data route", async () => {
+    mocks.verifyDashboardAuthToken.mockResolvedValue(true);
+
+    const response = await proxy(request("/api/headroom/proxy/v1/messages", {
+      host: "9router.nusawangsa.com",
+    }, { cookies: { auth_token: "valid-session" } }));
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe("Local only: CLI token required");
+  });
+
+  it("rejects remote settings writes without an origin", async () => {
+    mocks.verifyDashboardAuthToken.mockResolvedValue(true);
+
+    const response = await proxy(request("/api/headroom/proxy/settings", {
+      host: "9router.nusawangsa.com",
+    }, { cookies: { auth_token: "valid-session" }, method: "POST" }));
+
+    expect(response.status).toBe(403);
+  });
+
+  it("rejects authenticated remote writes to Headroom telemetry routes", async () => {
+    mocks.verifyDashboardAuthToken.mockResolvedValue(true);
+
+    const response = await proxy(request("/api/headroom/proxy/stats", {
+      host: "9router.nusawangsa.com",
+    }, { cookies: { auth_token: "valid-session" }, method: "POST" }));
+
+    expect(response.status).toBe(403);
+  });
 });
 
 describe("dashboard guard helpers", () => {
+  it("rejects remote payload access with dashboard JWT alone", async () => {
+    const remote = request("/api/usage/request-details", {
+      host: "router.example.com",
+    }, { cookies: { auth_token: "valid-session" } });
+
+    expect(await __test__.canAccessDetailPayloads(remote)).toBe(false);
+  });
+
+  it("allows local payload access", async () => {
+    expect(await __test__.canAccessDetailPayloads(localRequest("/api/usage/request-details"))).toBe(true);
+  });
+
+  it("allows payload access with a valid CLI token", async () => {
+    const remote = request("/api/usage/request-details", {
+      host: "router.example.com",
+      "x-9r-cli-token": "cli-token",
+    });
+
+    expect(await __test__.canAccessDetailPayloads(remote)).toBe(true);
+  });
+
+  it("rejects payload access with an invalid CLI token", async () => {
+    const remote = request("/api/usage/request-details", {
+      host: "router.example.com",
+      "x-9r-cli-token": "wrong-token",
+    });
+
+    expect(await __test__.canAccessDetailPayloads(remote)).toBe(false);
+  });
+
   it("extracts bearer API keys before x-api-key", () => {
     const apiRequest = request("/v1/chat/completions", {
       authorization: "Bearer bearer-key",

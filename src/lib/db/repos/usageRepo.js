@@ -3,6 +3,7 @@ import { getAdapter } from "../driver.js";
 import { hashKey } from "../../saas/keys.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { getMeta, setMeta } from "../helpers/metaStore.js";
+import { WIB_TIME_ZONE, formatWibLogTimestamp } from "../../../shared/utils/usagePresentation.js";
 
 function maskApiKey(key) {
   if (!key || typeof key !== "string") return null;
@@ -79,6 +80,7 @@ function aggregateEntryToDay(day, entry) {
   day.byAccount ||= {};
   day.byApiKey ||= {};
   day.byEndpoint ||= {};
+  day.bySource ||= {};
 
   if (entry.provider) addToCounter(day.byProvider, entry.provider, vals);
 
@@ -96,6 +98,9 @@ function aggregateEntryToDay(day, entry) {
   const endpoint = entry.endpoint || "Unknown";
   const epKey = `${endpoint}|${entry.model}|${entry.provider || "unknown"}`;
   addToCounter(day.byEndpoint, epKey, { ...vals, meta: { endpoint, rawModel: entry.model, provider: entry.provider } });
+
+  const source = entry.source || entry.meta?.source || "local";
+  addToCounter(day.bySource, source, { ...vals, meta: { source } });
 }
 
 function pushToRing(entry) {
@@ -123,11 +128,12 @@ async function ensureRingInitialized() {
   recentRing.initialized = true;
   try {
     const db = await getAdapter();
-    const rows = db.all(`SELECT timestamp, provider, model, connectionId, apiKey, endpoint, cost, status, tokens FROM usageHistory ORDER BY id DESC LIMIT ?`, [RING_CAP]);
+    const rows = db.all(`SELECT timestamp, provider, model, connectionId, apiKey, endpoint, cost, status, tokens, meta FROM usageHistory ORDER BY id DESC LIMIT ?`, [RING_CAP]);
     recentRing.items = rows.reverse().map((r) => ({
       timestamp: r.timestamp, provider: r.provider, model: r.model, connectionId: r.connectionId,
       apiKey: r.apiKey, endpoint: r.endpoint, cost: r.cost, status: r.status,
       tokens: parseJson(r.tokens, {}),
+      meta: parseJson(r.meta, {}),
     }));
   } catch {}
 }
@@ -294,7 +300,7 @@ export async function saveRequestUsage(entry) {
           entry.timestamp, entry.provider || null, entry.model || null,
           entry.connectionId || null, entry.apiKey || null, entry.endpoint || null,
           promptTokens, completionTokens, entry.cost || 0, entry.status || "ok",
-          stringifyJson(tokens), stringifyJson({}),
+          stringifyJson(tokens), stringifyJson(entry.meta || (entry.source ? { source: entry.source } : {})),
         ]
       );
 
@@ -315,7 +321,7 @@ export async function saveRequestUsage(entry) {
       const row = db.get(`SELECT data FROM usageDaily WHERE dateKey = ?`, [dateKey]);
       const day = row ? parseJson(row.data, {}) : {
         requests: 0, promptTokens: 0, completionTokens: 0, cost: 0,
-        byProvider: {}, byModel: {}, byAccount: {}, byApiKey: {}, byEndpoint: {},
+        byProvider: {}, byModel: {}, byAccount: {}, byApiKey: {}, byEndpoint: {}, bySource: {},
       };
       aggregateEntryToDay(day, entry);
       db.run(`INSERT INTO usageDaily(dateKey, data) VALUES(?, ?) ON CONFLICT(dateKey) DO UPDATE SET data = excluded.data`, [dateKey, stringifyJson(day)]);
@@ -418,7 +424,7 @@ export async function getUsageStats(period = "all") {
   const stats = {
     totalRequests: 0,
     totalPromptTokens: 0, totalCompletionTokens: 0, totalCachedTokens: 0, totalCost: 0,
-    byProvider: {}, byModel: {}, byAccount: {}, byApiKey: {}, byEndpoint: {},
+    byProvider: {}, byModel: {}, byAccount: {}, byApiKey: {}, byEndpoint: {}, bySource: {},
     last10Minutes: [],
     pending: pendingRequests,
     activeRequests: [],
@@ -556,14 +562,24 @@ export async function getUsageStats(period = "all") {
         stats.byEndpoint[epKey].completionTokens += ep.completionTokens || 0;
         stats.byEndpoint[epKey].cachedTokens += ep.cachedTokens || 0;
         stats.byEndpoint[epKey].cost += ep.cost || 0;
-        if (dateKey > (stats.byEndpoint[epKey].lastUsed || "")) stats.byEndpoint[epKey].lastUsed = dateKey;
+        if (new Date(dateKey) > new Date(stats.byEndpoint[epKey].lastUsed)) stats.byEndpoint[epKey].lastUsed = dateKey;
+      }
+
+      for (const [sourceKey, source] of Object.entries(day.bySource || {})) {
+        if (!stats.bySource[sourceKey]) {
+          stats.bySource[sourceKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, source: source.source || sourceKey, lastUsed: dateKey };
+        }
+        stats.bySource[sourceKey].requests += source.requests || 0;
+        stats.bySource[sourceKey].promptTokens += source.promptTokens || 0;
+        stats.bySource[sourceKey].completionTokens += source.completionTokens || 0;
+        stats.bySource[sourceKey].cachedTokens += source.cachedTokens || 0;
+        stats.bySource[sourceKey].cost += source.cost || 0;
+        if (dateKey > (stats.bySource[sourceKey].lastUsed || "")) stats.bySource[sourceKey].lastUsed = dateKey;
       }
     }
-
-    // Overlay precise lastUsed timestamps from history
     const overlayCutoff = maxDays ? Date.now() - maxDays * 86400000 : 0;
     const histRows = db.all(
-      `SELECT timestamp, provider, model, connectionId, apiKey, endpoint FROM usageHistory WHERE timestamp >= ?`,
+      `SELECT timestamp, provider, model, connectionId, apiKey, endpoint, meta FROM usageHistory WHERE timestamp >= ?`,
       [new Date(overlayCutoff).toISOString()]
     );
     for (const e of histRows) {
@@ -585,6 +601,9 @@ export async function getUsageStats(period = "all") {
       const endpoint = e.endpoint || "Unknown";
       const endpointKey = `${endpoint}|${e.model}|${e.provider || "unknown"}`;
       if (stats.byEndpoint[endpointKey] && new Date(ts) > new Date(stats.byEndpoint[endpointKey].lastUsed)) stats.byEndpoint[endpointKey].lastUsed = ts;
+
+      const source = parseJson(e.meta, {})?.source || "local";
+      if (stats.bySource[source] && new Date(ts) > new Date(stats.bySource[source].lastUsed)) stats.bySource[source].lastUsed = ts;
     }
   } else {
     // 24h / today: live history
@@ -597,7 +616,7 @@ export async function getUsageStats(period = "all") {
       cutoff = new Date(Date.now() - PERIOD_MS["24h"]).toISOString();
     }
     const filtered = db.all(
-      `SELECT timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, tokens FROM usageHistory WHERE timestamp >= ?`,
+      `SELECT timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, tokens, meta FROM usageHistory WHERE timestamp >= ?`,
       [cutoff]
     );
 
@@ -608,11 +627,33 @@ export async function getUsageStats(period = "all") {
       const cachedTokens = tokens.cached_tokens || tokens.cache_read_input_tokens || 0;
       const entryCost = r.cost || 0;
       const providerDisplayName = providerNodeNameMap[r.provider] || r.provider;
+      const meta = parseJson(r.meta, {}) || {};
+      const source = meta.source || r.clientIp || "local";
 
       stats.totalPromptTokens += promptTokens;
       stats.totalCompletionTokens += completionTokens;
       stats.totalCachedTokens += cachedTokens;
       stats.totalCost += entryCost;
+
+      if (!stats.bySource[source]) {
+        stats.bySource[source] = {
+          requests: 0,
+          promptTokens: 0,
+          completionTokens: 0,
+          cachedTokens: 0,
+          cost: 0,
+          source,
+          lastUsed: r.timestamp,
+        };
+      }
+      stats.bySource[source].requests++;
+      stats.bySource[source].promptTokens += promptTokens;
+      stats.bySource[source].completionTokens += completionTokens;
+      stats.bySource[source].cachedTokens += cachedTokens;
+      stats.bySource[source].cost += entryCost;
+      if (new Date(r.timestamp) > new Date(stats.bySource[source].lastUsed)) {
+        stats.bySource[source].lastUsed = r.timestamp;
+      }
 
       if (!stats.byProvider[r.provider]) stats.byProvider[r.provider] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 };
       stats.byProvider[r.provider].requests++;
@@ -692,7 +733,7 @@ export async function getChartData(period = "7d") {
     startOfDay.setHours(0, 0, 0, 0);
     const startTime = startOfDay.getTime();
     const endTime = startTime + bucketCount * bucketMs;
-    const labelFn = (ts) => new Date(ts).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+    const labelFn = (ts) => new Intl.DateTimeFormat("en-GB", { timeZone: WIB_TIME_ZONE, hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(ts));
     const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cost: 0 }));
 
     const rows = db.all(
@@ -714,7 +755,7 @@ export async function getChartData(period = "7d") {
   if (period === "24h") {
     const bucketCount = 24;
     const bucketMs = 3600000;
-    const labelFn = (ts) => new Date(ts).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+    const labelFn = (ts) => new Intl.DateTimeFormat("en-GB", { timeZone: WIB_TIME_ZONE, hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(ts));
     const startTime = now - bucketCount * bucketMs;
     const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: labelFn(startTime + i * bucketMs), tokens: 0, cost: 0 }));
 
@@ -734,7 +775,7 @@ export async function getChartData(period = "7d") {
 
   const bucketCount = period === "7d" ? 7 : period === "30d" ? 30 : 60;
   const today = new Date();
-  const labelFn = (d) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const labelFn = (d) => d.toLocaleDateString("en-US", { timeZone: WIB_TIME_ZONE, month: "short", day: "numeric" });
 
   // Build map of dateKey → day data
   const dayRows = loadDaysInRange(db, bucketCount);
@@ -752,11 +793,6 @@ export async function getChartData(period = "7d") {
       cost: dayData ? (dayData.cost || 0) : 0,
     };
   });
-}
-
-function formatLogDate(date = new Date()) {
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${pad(date.getDate())}-${pad(date.getMonth() + 1)}-${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
 // No-op: request log is now derived from usageHistory table on read.
@@ -779,7 +815,7 @@ export async function getRecentLogs(limit = 200) {
     } catch {}
 
     return rows.map((r) => {
-      const ts = formatLogDate(new Date(r.timestamp));
+      const ts = formatWibLogTimestamp(r.timestamp);
       const p = r.provider?.toUpperCase() || "-";
       const m = r.model || "-";
       const account = connMap[r.connectionId] || (r.connectionId ? r.connectionId.slice(0, 8) : "-");
