@@ -90,6 +90,8 @@ export function normalizeReason(message, code) {
     .replace(/\b\d{4}-\d{2}-\d{2}[t ]\d{2}:\d{2}:\d{2}[.\d]*z?/gi, "<ts>")
     .replace(/\b\d{4}-\d{2}-\d{2}\b/g, "<date>")
     .replace(/\b\d+ms\b/g, "<n>ms")
+    // Percentages, including comparison forms like "<5%" / ">=10%".
+    .replace(/[<>]=?\s*\d+(?:\.\d+)?%|\b\d+(?:\.\d+)?%/g, "<n>%")
     // Collapse standalone numbers but keep version/model tokens like kimi-k2.5.
     .replace(/(?<![\w.\-])\d+(?![\w.])/g, "<n>")
     .replace(/http:\/\/[^\s)]+/g, "<url>")
