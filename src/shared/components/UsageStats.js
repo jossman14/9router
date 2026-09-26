@@ -21,6 +21,7 @@ import UsageChart from "@/app/(dashboard)/dashboard/usage/components/UsageChart"
 import UsageRecap from "@/app/(dashboard)/dashboard/usage/components/UsageRecap";
 import ProviderBarChart from "@/app/(dashboard)/dashboard/usage/components/ProviderBarChart";
 import TopModelsChart from "@/app/(dashboard)/dashboard/usage/components/TopModelsChart";
+import SourceBreakdown from "@/app/(dashboard)/dashboard/usage/components/SourceBreakdown";
 
 function timeAgo(timestamp) {
   const diff = Math.floor((Date.now() - new Date(timestamp)) / 1000);
@@ -86,6 +87,23 @@ function RecentRequests({ requests = [] }) {
         </div>
       )}
     </Card>
+  );
+}
+
+// Small pill classifying a usage source: Local / Private / Public network.
+function IpHint({ type, label }) {
+  const styles = {
+    local: "bg-surface-2 text-text-muted border-border",
+    private: "bg-info/10 text-info border-info/25",
+    public: "bg-warning/10 text-warning border-warning/25",
+  };
+  const icons = { local: "computer", private: "lan", public: "public" };
+  const key = styles[type] ? type : "local";
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium ${styles[key]}`}>
+      <span className="material-symbols-outlined text-[14px]">{icons[key]}</span>
+      {label || "Local"}
+    </span>
   );
 }
 
@@ -188,11 +206,19 @@ const ENDPOINT_COLUMNS = [
   { field: "lastUsed", label: "Last Used", align: "right" },
 ];
 
+const SOURCE_COLUMNS = [
+  { field: "sourceIp", label: "Source IP" },
+  { field: "sourceLabel", label: "Scope" },
+  { field: "requests", label: "Requests", align: "right" },
+  { field: "lastUsed", label: "Last Used", align: "right" },
+];
+
 const TABLE_OPTIONS = [
   { value: "model", label: "Usage by Model" },
   { value: "account", label: "Usage by Account" },
   { value: "apiKey", label: "Usage by API Key" },
   { value: "endpoint", label: "Usage by Endpoint" },
+  { value: "source", label: "Usage by Source (IP)" },
 ];
 
 const PERIODS = [
@@ -434,6 +460,29 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
           ),
         };
       }
+      case "source": {
+        return {
+          columns: SOURCE_COLUMNS,
+          groupedData: groupDataByKey(sortData(stats.bySource, {}, sortBy, sortOrder), "sourceIp"),
+          storageKey: "usage-stats:expanded-sources",
+          emptyMessage: "No source usage recorded yet.",
+          renderSummaryCells: (group) => (
+            <>
+              <td className="px-6 py-3 text-text-muted">—</td>
+              <td className="px-6 py-3 text-right">{fmt(group.summary.requests)}</td>
+              <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(group.summary.lastUsed)}</td>
+            </>
+          ),
+          renderDetailCells: (item) => (
+            <>
+              <td className="px-6 py-3 font-medium font-mono text-sm">{item.sourceIp || item.source}</td>
+              <td className="px-6 py-3"><IpHint type={item.sourceType} label={item.sourceLabel} /></td>
+              <td className="px-6 py-3 text-right">{fmt(item.requests)}</td>
+              <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(item.lastUsed)}</td>
+            </>
+          ),
+        };
+      }
     }
   }, [stats, tableView, sortBy, sortOrder]);
 
@@ -497,6 +546,11 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
           <ProviderBarChart byProvider={stats.byProvider} />
           <TopModelsChart byModel={stats.byModel} />
         </div>
+      )}
+
+      {/* Per-source (client IP) usage + cost */}
+      {!loading && (
+        <SourceBreakdown bySource={stats.bySource} />
       )}
 
       {/* Table with dropdown selector */}

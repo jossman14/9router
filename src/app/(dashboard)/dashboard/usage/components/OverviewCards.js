@@ -3,33 +3,109 @@
 import PropTypes from "prop-types";
 import Card from "@/shared/components/Card";
 
-const fmt = (n) => new Intl.NumberFormat().format(n || 0);
-const fmtCost = (n) => `$${(n || 0).toFixed(2)}`;
+const fmt = (n) => new Intl.NumberFormat().format(Math.round(n || 0));
+
+const fmtCompact = (n) => {
+  const v = n || 0;
+  if (v >= 1_000_000_000) return `${(v / 1_000_000_000).toFixed(2)}B`;
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(2)}M`;
+  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
+  return String(Math.round(v));
+};
+
+const fmtCost = (n) => {
+  const v = n || 0;
+  if (v === 0) return "$0.00";
+  if (v < 0.01) return `$${v.toFixed(4)}`;
+  if (v < 1) return `$${v.toFixed(3)}`;
+  return `$${v.toFixed(2)}`;
+};
+
+function MetricCard({ icon, iconClass, label, value, hint, accent }) {
+  return (
+    <Card className="group relative flex min-w-0 flex-col gap-2 overflow-hidden px-3.5 py-3 transition-colors hover:border-border">
+      <div
+        className="pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full opacity-[0.07] blur-xl transition-opacity group-hover:opacity-[0.14]"
+        style={{ backgroundColor: accent }}
+      />
+      <div className="flex items-center gap-2">
+        <span
+          className={`material-symbols-outlined text-[18px] ${iconClass}`}
+          style={{ color: accent }}
+        >
+          {icon}
+        </span>
+        <span className="truncate text-[11px] font-semibold uppercase tracking-wide text-text-muted">{label}</span>
+      </div>
+      <span className="w-full truncate font-mono text-xl font-bold tabular-nums text-text-main" title={fmt(value)}>
+        {value}
+      </span>
+      {hint && <span className="text-[10px] leading-tight text-text-subtle">{hint}</span>}
+    </Card>
+  );
+}
+
+MetricCard.propTypes = {
+  icon: PropTypes.string.isRequired,
+  iconClass: PropTypes.string,
+  label: PropTypes.string.isRequired,
+  value: PropTypes.node.isRequired,
+  hint: PropTypes.string,
+  accent: PropTypes.string,
+};
 
 export default function OverviewCards({ stats }) {
+  const totalTokens =
+    (stats.totalPromptTokens || 0) + (stats.totalCompletionTokens || 0);
+  const cachedShare = stats.totalPromptTokens > 0
+    ? Math.round((stats.totalCachedTokens / stats.totalPromptTokens) * 100)
+    : 0;
+  const avgCost = stats.totalRequests > 0 ? stats.totalCost / stats.totalRequests : 0;
+
   return (
-    <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 sm:gap-4">
-      <Card className="flex min-w-0 flex-col items-center text-center gap-1 px-3 py-3 sm:px-4">
-        <span className="text-text-muted text-xs uppercase font-semibold sm:text-sm">Total Requests</span>
-        <span className="w-full truncate text-lg font-bold xl:text-xl" title={fmt(stats.totalRequests)}>{fmt(stats.totalRequests)}</span>
-      </Card>
-      <Card className="flex min-w-0 flex-col items-center text-center gap-1 px-3 py-3 sm:px-4">
-        <span className="text-text-muted text-xs uppercase font-semibold sm:text-sm">Total Input Tokens</span>
-        <span className="w-full truncate text-lg font-bold text-primary xl:text-xl" title={fmt(stats.totalPromptTokens)}>{fmt(stats.totalPromptTokens)}</span>
-      </Card>
-      <Card className="flex min-w-0 flex-col items-center text-center gap-1 px-3 py-3 sm:px-4">
-        <span className="text-text-muted text-xs uppercase font-semibold sm:text-sm">Cached Tokens</span>
-        <span className="w-full truncate text-lg font-bold text-info xl:text-xl" title={fmt(stats.totalCachedTokens)}>{fmt(stats.totalCachedTokens)}</span>
-      </Card>
-      <Card className="flex min-w-0 flex-col items-center text-center gap-1 px-3 py-3 sm:px-4">
-        <span className="text-text-muted text-xs uppercase font-semibold sm:text-sm">Output Tokens</span>
-        <span className="w-full truncate text-lg font-bold text-success xl:text-xl" title={fmt(stats.totalCompletionTokens)}>{fmt(stats.totalCompletionTokens)}</span>
-      </Card>
-      <Card className="flex min-w-0 flex-col items-center text-center gap-1 px-3 py-3 sm:px-4">
-        <span className="text-text-muted text-xs uppercase font-semibold sm:text-sm">Est. Cost</span>
-        <span className="w-full truncate text-lg font-bold text-warning xl:text-xl" title={`~${fmtCost(stats.totalCost)}`}>~{fmtCost(stats.totalCost)}</span>
-        <span className="text-[10px] text-text-muted">Estimated, not actual billing</span>
-      </Card>
+    <div className="grid min-w-0 grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
+      <MetricCard
+        icon="bolt"
+        label="Requests"
+        accent="#3B76F6"
+        value={fmt(stats.totalRequests)}
+        hint={`${fmt(stats.totalRequests)} total calls`}
+      />
+      <MetricCard
+        icon="toll"
+        label="Total Tokens"
+        accent="#3B76F6"
+        value={fmtCompact(totalTokens)}
+        hint={`${fmt(totalTokens)} tokens`}
+      />
+      <MetricCard
+        icon="south_west"
+        label="Input"
+        accent="#6366f1"
+        value={fmtCompact(stats.totalPromptTokens)}
+        hint={`${fmt(stats.totalPromptTokens)} tokens`}
+      />
+      <MetricCard
+        icon="bolt_boost"
+        label="Cached"
+        accent="#06b6d4"
+        value={fmtCompact(stats.totalCachedTokens)}
+        hint={`${cachedShare}% of input hit cache`}
+      />
+      <MetricCard
+        icon="north_east"
+        label="Output"
+        accent="#10b981"
+        value={fmtCompact(stats.totalCompletionTokens)}
+        hint={`${fmt(stats.totalCompletionTokens)} tokens`}
+      />
+      <MetricCard
+        icon="payments"
+        label="Est. Cost"
+        accent="#f59e0b"
+        value={fmtCost(stats.totalCost)}
+        hint={`~${fmtCost(avgCost)} / request · not actual billing`}
+      />
     </div>
   );
 }

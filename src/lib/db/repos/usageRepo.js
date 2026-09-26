@@ -11,6 +11,25 @@ function maskApiKey(key) {
   return key.slice(0, 8) + "***";
 }
 
+// Classify a usage source (client IP as stamped by custom-server.js) so the UI
+// can group by network origin instead of showing raw addresses only.
+// type: "local" (loopback), "private" (RFC1918 / ULA / link-local), "public".
+// ipv6-mapped IPv4 addresses are normalized to their IPv4 form for readability.
+export function describeSource(raw) {
+  const source = !raw || raw === "local" ? "local" : String(raw);
+  const ip = source.startsWith("::ffff:") ? source.slice(7) : source;
+  if (ip === "local" || ip === "127.0.0.1" || ip === "::1") {
+    return { source, ip: source === "local" ? "local" : ip, type: "local", label: "Local" };
+  }
+  if (/^10\./.test(ip) || /^192\.168\./.test(ip) || /^172\.(1[6-9]|2\d|3[01])\./.test(ip) || /^169\.254\./.test(ip)) {
+    return { source, ip, type: "private", label: "Private" };
+  }
+  if (/^f[cd][0-9a-f]{2}:/i.test(ip) || /^fe80:/i.test(ip)) {
+    return { source, ip, type: "private", label: "Private" };
+  }
+  return { source, ip, type: "public", label: "Public" };
+}
+
 const PENDING_TIMEOUT_MS = 60 * 1000;
 const RING_CAP = 50;
 const CONN_CACHE_TTL_MS = 30 * 1000;
@@ -567,7 +586,8 @@ export async function getUsageStats(period = "all") {
 
       for (const [sourceKey, source] of Object.entries(day.bySource || {})) {
         if (!stats.bySource[sourceKey]) {
-          stats.bySource[sourceKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, source: source.source || sourceKey, lastUsed: dateKey };
+          const meta = describeSource(source.source || sourceKey);
+          stats.bySource[sourceKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, source: source.source || sourceKey, sourceIp: meta.ip, sourceType: meta.type, sourceLabel: meta.label, lastUsed: dateKey };
         }
         stats.bySource[sourceKey].requests += source.requests || 0;
         stats.bySource[sourceKey].promptTokens += source.promptTokens || 0;
@@ -645,6 +665,7 @@ export async function getUsageStats(period = "all") {
       stats.totalCost += entryCost;
 
       if (!stats.bySource[source]) {
+        const meta2 = describeSource(source);
         stats.bySource[source] = {
           requests: 0,
           promptTokens: 0,
@@ -652,6 +673,9 @@ export async function getUsageStats(period = "all") {
           cachedTokens: 0,
           cost: 0,
           source,
+          sourceIp: meta2.ip,
+          sourceType: meta2.type,
+          sourceLabel: meta2.label,
           lastUsed: r.timestamp,
         };
       }
@@ -728,7 +752,32 @@ export async function getUsageStats(period = "all") {
   }
 
   stats.totalRequests = Object.values(stats.byProvider).reduce((sum, p) => sum + (p.requests || 0), 0);
+
+  // Derive display-only fields for the source (IP) breakdown so the UI can show
+  // total tokens plus an input/cached/output cost split. The split is a token-share
+  // allocation of the rate-accurate server total, consistent with the model tables.
+  for (const entry of Object.values(stats.bySource)) {
+    decorateUsageEntry(entry);
+  }
+
   return stats;
+}
+
+// Add totalTokens + token-share cost split to an aggregated usage bucket.
+// cached is a subset of prompt, so it is peeled out of the input share.
+function decorateUsageEntry(entry) {
+  const promptTokens = entry.promptTokens || 0;
+  const cachedTokens = entry.cachedTokens || 0;
+  const completionTokens = entry.completionTokens || 0;
+  const totalCost = entry.cost || 0;
+  const totalTokens = promptTokens + completionTokens;
+  const nonCachedInput = Math.max(0, promptTokens - cachedTokens);
+  const share = totalTokens > 0 ? totalCost / totalTokens : 0;
+  entry.totalTokens = totalTokens;
+  entry.inputCost = nonCachedInput * share;
+  entry.cachedCost = cachedTokens * share;
+  entry.outputCost = completionTokens * share;
+  return entry;
 }
 
 export async function getChartData(period = "7d") {
