@@ -12,6 +12,7 @@ import { createErrorResult, parseUpstreamError, formatProviderError } from "../u
 import { HTTP_STATUS, TOKEN_SAVER_HEADER } from "../config/runtimeConfig.js";
 import { handleBypassRequest } from "../utils/bypassHandler.js";
 import { trackPendingRequest, appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
+import { recordEvent } from "@/lib/consoleEventBuffer";
 import { getExecutor } from "../executors/index.js";
 import { supportsGrokCliReasoningEffort } from "../config/grokCli.js";
 import { buildRequestDetail, extractRequestConfig, buildProviderHeaders, clientSource } from "./chatCore/requestDetail.js";
@@ -63,6 +64,10 @@ export function stripContinuityFields(body) {
 export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking }) {
   const { provider, model } = modelInfo;
   const requestStartTime = Date.now();
+  // Resolve client IP once so every recorded event can be grouped by source.
+  const safeClientSource = (req) => { try { return clientSource(req); } catch { return "local"; } };
+  const eventSource = safeClientSource(clientRawRequest);
+  const emitEvent = (opts) => { try { recordEvent({ provider, model, apiKey, source: eventSource, ...opts }); } catch { /* never break a request */ } };
   // Stable per-session color so all lines of one CLI conversation share a tag
   const sessionSeed = (() => {
     try {
@@ -248,6 +253,13 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     if (think) parts.push(`THINK:${think}`);
     parts.push(`ACC:${acc}`);
     log.line(reqTag, "▶", parts.join(" · "));
+    emitEvent({
+      level: "info",
+      tag: "CHAT",
+      phase: "start",
+      status: "started",
+      message: `POST ${clientModel} → ${provider}/${model}`,
+    });
   }
 
   // TTS models don't support tool messages/function calling
@@ -278,8 +290,12 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     log?.info?.("HEADROOM", `${headroomLine}${headroomSizeLine ? ` | ${headroomSizeLine}` : ""}`);
     if (isHeadroomPhantomSavings(headroomStats, headroomDiagnostics)) {
       log?.warn?.("HEADROOM", `reported token delta, but outbound JSON shrank <5%; provider may bill near-original payload | ${formatHeadroomSizeLog(headroomDiagnostics)}`);
+      emitEvent({ level: "warn", tag: "HEADROOM", message: `phantom savings: outbound JSON shrank <5% despite reported token delta | ${formatHeadroomSizeLog(headroomDiagnostics)}` });
     }
-  } else if (tokenSaverEnabled && headroomEnabled) log?.warn?.("HEADROOM", `skipped: ${headroomDiagnostics.reason || "compression unavailable"}${headroomDiagnostics.endpoint ? ` (${headroomDiagnostics.endpoint})` : ""}`);
+  } else if (tokenSaverEnabled && headroomEnabled) {
+    log?.warn?.("HEADROOM", `skipped: ${headroomDiagnostics.reason || "compression unavailable"}${headroomDiagnostics.endpoint ? ` (${headroomDiagnostics.endpoint})` : ""}`);
+    emitEvent({ level: "warn", tag: "HEADROOM", message: `skipped: ${headroomDiagnostics.reason || "compression unavailable"}${headroomDiagnostics.endpoint ? ` (${headroomDiagnostics.endpoint})` : ""}` });
+  }
 
   // Token-saver flags accumulator for the single "⚙" log line below.
   const xf = [];
@@ -423,6 +439,14 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       return createErrorResult(499, "Request aborted");
     }
     const errMsg = formatProviderError(error, provider, model, HTTP_STATUS.BAD_GATEWAY);
+    emitEvent({
+      level: "error",
+      tag: "CHAT",
+      phase: "error",
+      status: "error",
+      code: error.name === "AbortError" ? 499 : HTTP_STATUS.BAD_GATEWAY,
+      message: errMsg,
+    });
     if (log?.errorLine) {
       log.errorLine(reqTag, "✗", `ERROR 502 · ${provider}/${model} · ${Date.now() - requestStartTime}ms\n    ${errMsg}${error.stack ? `\n    ${error.stack}` : ""}`);
     }
@@ -497,6 +521,14 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     })).catch(() => { });
 
     const errMsg = formatProviderError(new Error(message), provider, model, statusCode);
+    emitEvent({
+      level: "error",
+      tag: "CHAT",
+      phase: "error",
+      status: "error",
+      code: statusCode,
+      message: errMsg,
+    });
     if (log?.errorLine) {
       const urlStr = providerUrl ? `\n    URL: ${providerUrl}` : "";
       log.errorLine(reqTag, "✗", `ERROR ${statusCode} · ${provider}/${model} · ${Date.now() - requestStartTime}ms${urlStr}\n    ${errMsg}`);

@@ -8,6 +8,7 @@ import { buildAbortedResponsesTerminalBytes } from "../../utils/responsesStreamH
 import { buildStreamErrorBytes } from "../../utils/streamHelpers.js";
 import { buildRequestDetail, extractRequestConfig, saveUsageStats, clientSource, formatDoneLine, buildProviderHeaders } from "./requestDetail.js";
 import { saveRequestDetail } from "@/lib/usageDb.js";
+import { recordEvent } from "@/lib/consoleEventBuffer";
 import { SSE_HEADERS_CORS as SSE_HEADERS } from "../../utils/sseConstants.js";
 
 // Codex returns Responses API SSE → which client format to translate INTO, by request sourceFormat.
@@ -149,6 +150,14 @@ export function buildOnStreamComplete({ provider, model, connectionId, apiKey, r
 
     // Persist stream usage to DB (no console line; the "📊 done" line below is authoritative)
     saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, source: clientSource(clientRawRequest), label: "STREAM USAGE", silent: true });
+    try {
+      recordEvent({
+        level: "info", tag: "CHAT", provider, model, apiKey,
+        source: clientSource(clientRawRequest),
+        phase: "done", status: "ok", code: 200,
+        message: "STREAM done",
+      });
+    } catch { /* never break a request */ }
     if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency }));
   };
 

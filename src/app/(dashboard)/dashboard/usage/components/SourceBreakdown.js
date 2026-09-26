@@ -13,6 +13,7 @@ import {
   Cell,
 } from "recharts";
 import Card from "@/shared/components/Card";
+import { useUsdIdr } from "@/shared/hooks/useUsdIdr";
 
 const COLORS = ["#3B76F6", "#14b8a6", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4", "#10b981", "#f97316"];
 
@@ -43,7 +44,7 @@ const TYPE_META = {
   public: { icon: "public", tint: "text-warning", chip: "bg-warning/10 text-warning border-warning/25" },
 };
 
-function SourceRow({ entry, maxTokens, index }) {
+function SourceRow({ entry, maxTokens, index, fmtIdr }) {
   const meta = TYPE_META[entry.type] || TYPE_META.local;
   const tokens = entry.tokens || 0;
   const pct = maxTokens > 0 ? Math.max(2, Math.round((tokens / maxTokens) * 100)) : 0;
@@ -61,7 +62,10 @@ function SourceRow({ entry, maxTokens, index }) {
             {entry.label}
           </span>
         </div>
-        <span className="shrink-0 font-mono text-sm font-semibold tabular-nums text-text-main">{fmtCost(entry.cost)}</span>
+        <div className="flex shrink-0 flex-col items-end">
+          <span className="font-mono text-sm font-semibold tabular-nums text-text-main">{fmtCost(entry.cost)}</span>
+          {fmtIdr && <span className="font-mono text-[11px] tabular-nums text-text-subtle">{fmtIdr(entry.cost)}</span>}
+        </div>
       </div>
 
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-3/60">
@@ -85,6 +89,7 @@ SourceRow.propTypes = {
   entry: PropTypes.object.isRequired,
   maxTokens: PropTypes.number.isRequired,
   index: PropTypes.number.isRequired,
+  fmtIdr: PropTypes.func,
 };
 
 /**
@@ -93,6 +98,7 @@ SourceRow.propTypes = {
  */
 export default function SourceBreakdown({ bySource }) {
   const [metric, setMetric] = useState("cost");
+  const { rate, fmtIdr } = useUsdIdr();
 
   const entries = useMemo(() => {
     return Object.values(bySource || {})
@@ -171,6 +177,7 @@ export default function SourceBreakdown({ bySource }) {
             <div className="rounded-xl border border-border/60 bg-surface-2/50 px-3 py-2">
               <div className="text-[10px] font-semibold uppercase tracking-wide text-text-subtle">Total</div>
               <div className="font-mono text-base font-bold text-text-main">{isCost ? fmtCost(totals.cost) : fmtTokens(totals.tokens)}</div>
+              {isCost && rate > 0 && <div className="font-mono text-[11px] text-text-subtle">{fmtIdr(totals.cost)}</div>}
             </div>
             <div className="rounded-xl border border-border/60 bg-surface-2/50 px-3 py-2">
               <div className="text-[10px] font-semibold uppercase tracking-wide text-text-subtle">Input</div>
@@ -225,7 +232,7 @@ export default function SourceBreakdown({ bySource }) {
           {/* Detailed per-IP list */}
           <div className="flex max-h-72 flex-col gap-2 overflow-y-auto pr-0.5">
             {entries.map((entry, i) => (
-              <SourceRow key={entry.source} entry={entry} maxTokens={maxTokens} index={i} />
+              <SourceRow key={entry.source} entry={entry} maxTokens={maxTokens} index={i} fmtIdr={isCost ? fmtIdr : null} />
             ))}
           </div>
         </>

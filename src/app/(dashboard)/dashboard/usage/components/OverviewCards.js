@@ -2,6 +2,7 @@
 
 import PropTypes from "prop-types";
 import Card from "@/shared/components/Card";
+import { useUsdIdr } from "@/shared/hooks/useUsdIdr";
 
 const fmt = (n) => new Intl.NumberFormat().format(Math.round(n || 0));
 
@@ -21,7 +22,7 @@ const fmtCost = (n) => {
   return `$${v.toFixed(2)}`;
 };
 
-function MetricCard({ icon, iconClass, label, value, hint, accent }) {
+function MetricCard({ icon, iconClass, label, value, hint, sub, accent }) {
   return (
     <Card className="group relative flex min-w-0 flex-col gap-2 overflow-hidden px-3.5 py-3 transition-colors hover:border-border">
       <div
@@ -40,6 +41,7 @@ function MetricCard({ icon, iconClass, label, value, hint, accent }) {
       <span className="w-full truncate font-mono text-xl font-bold tabular-nums text-text-main" title={fmt(value)}>
         {value}
       </span>
+      {sub && <span className="w-full truncate font-mono text-sm font-semibold text-text-muted">{sub}</span>}
       {hint && <span className="text-[10px] leading-tight text-text-subtle">{hint}</span>}
     </Card>
   );
@@ -51,16 +53,21 @@ MetricCard.propTypes = {
   label: PropTypes.string.isRequired,
   value: PropTypes.node.isRequired,
   hint: PropTypes.string,
+  sub: PropTypes.node,
   accent: PropTypes.string,
 };
 
 export default function OverviewCards({ stats }) {
+  const { rate, source, updatedAt, fmtIdr } = useUsdIdr();
   const totalTokens =
     (stats.totalPromptTokens || 0) + (stats.totalCompletionTokens || 0);
   const cachedShare = stats.totalPromptTokens > 0
     ? Math.round((stats.totalCachedTokens / stats.totalPromptTokens) * 100)
     : 0;
   const avgCost = stats.totalRequests > 0 ? stats.totalCost / stats.totalRequests : 0;
+  const rateHint = rate > 0
+    ? `Rp${new Intl.NumberFormat("id-ID").format(rate)}/USD · ${updatedAt ? new Date(updatedAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "-"}${source ? ` (${source})` : ""}`
+    : "memuat kurs…";
 
   return (
     <div className="grid min-w-0 grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
@@ -104,7 +111,8 @@ export default function OverviewCards({ stats }) {
         label="Est. Cost"
         accent="#f59e0b"
         value={fmtCost(stats.totalCost)}
-        hint={`~${fmtCost(avgCost)} / request · not actual billing`}
+        sub={fmtIdr(stats.totalCost)}
+        hint={`~${fmtCost(avgCost)} / req · ${rateHint}`}
       />
     </div>
   );

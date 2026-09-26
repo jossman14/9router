@@ -10,6 +10,7 @@ import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
 // Responses-API providers (e.g. codex) may emit SSE without content-type + use Responses output shape
 const isResponsesProvider = (p) => PROVIDERS[p]?.format === FORMATS.OPENAI_RESPONSES;
 import { saveRequestDetail, appendRequestLog } from "@/lib/usageDb.js";
+import { recordEvent } from "@/lib/consoleEventBuffer";
 
 function textFromResponsesMessageItem(item) {
   if (!item?.content || !Array.isArray(item.content)) return "";
@@ -207,6 +208,9 @@ export async function handleForcedSSEToJson({ providerResponse, providerHeaders,
       const usage = jsonResponse.usage || {};
       appendLog({ tokens: usage, status: "200 OK" });
       saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, source: clientSource(clientRawRequest), silent: true });
+      try {
+        recordEvent({ level: "info", tag: "CHAT", provider, model, apiKey, source: clientSource(clientRawRequest), phase: "done", status: "ok", code: 200, message: "JSON (forced SSE) done" });
+      } catch { /* never break a request */ }
       if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
 
       // Same cache-inclusive total for the recorded detail, so the DB and the
@@ -328,6 +332,9 @@ export async function handleForcedSSEToJson({ providerResponse, providerHeaders,
     const usage = parsed.usage || {};
     appendLog({ tokens: usage, status: "200 OK" });
     saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, source: clientSource(clientRawRequest), silent: true });
+    try {
+      recordEvent({ level: "info", tag: "CHAT", provider, model, apiKey, source: clientSource(clientRawRequest), phase: "done", status: "ok", code: 200, message: "JSON (forced SSE) done" });
+    } catch { /* never break a request */ }
     if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
     const totalLatency = Date.now() - requestStartTime;
 

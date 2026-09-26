@@ -1,5 +1,7 @@
 // Logger utility for cloud
 
+import { recordEvent } from "@/lib/consoleEventBuffer";
+
 const LOG_LEVELS = {
   DEBUG: 0,
   INFO: 1,
@@ -41,6 +43,23 @@ export function line(tag, symbol, message) {
 // Like line() but always printed regardless of LOG_LEVEL (errors must never be hidden)
 export function errorLine(tag, symbol, message) {
   console.log(`[${formatTime()}] ${tag} ${symbol} ${message}`);
+  try {
+    const isError = symbol === "✗" || /\bERROR\b/.test(String(message));
+    recordEvent({
+      level: isError ? "error" : "warn",
+      tag: "CHAT",
+      message,
+      phase: "error",
+      status: "error",
+      code: extractStatus(message),
+    });
+  } catch { /* recording must never break a request */ }
+}
+
+// Pull a numeric HTTP status out of an "ERROR 502 …" / "BLOCKED 400 …" line.
+function extractStatus(message) {
+  const m = String(message || "").match(/\b(?:ERROR|BLOCKED)\s+(\d{3})/);
+  return m ? m[1] : null;
 }
 
 // Format thinking intent for the request line ("high(10k)" / "off" / "auto")
@@ -80,10 +99,20 @@ export function info(tag, message, data) {
   }
 }
 
+// HEADROOM warns are emitted with source context directly from chatCore, so
+// recording them here too would double-count. COMBO has no source context at
+// its call sites, so it is still recorded generically (grouped by component).
+const EVENT_TAG_EXCLUDES = new Set(["HEADROOM"]);
+
 export function warn(tag, message, data) {
   if (LEVEL <= LOG_LEVELS.WARN) {
     const dataStr = data ? ` ${formatData(data)}` : "";
     console.warn(`[${formatTime()}] ⚠️  [${tag}] ${message}${dataStr}`);
+    if (!EVENT_TAG_EXCLUDES.has(tag)) {
+      try {
+        recordEvent({ level: "warn", tag, message, phase: "warn", status: "warn" });
+      } catch { /* never break a request */ }
+    }
   }
 }
 
@@ -91,6 +120,9 @@ export function error(tag, message, data) {
   if (LEVEL <= LOG_LEVELS.ERROR) {
     const dataStr = data ? ` ${formatData(data)}` : "";
     console.log(`[${formatTime()}] ❌ [${tag}] ${message}${dataStr}`);
+    try {
+      recordEvent({ level: "error", tag, message, phase: "error", status: "error" });
+    } catch { /* never break a request */ }
   }
 }
 

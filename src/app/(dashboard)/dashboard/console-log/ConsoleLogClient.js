@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Card, Button } from "@/shared/components";
 import { CONSOLE_LOG_CONFIG } from "@/shared/constants/config";
+import LogInsights from "./LogInsights";
 
 const LOG_LEVEL_COLORS = {
   LOG: "text-green-400",
@@ -22,6 +23,7 @@ function colorLine(line) {
 export default function ConsoleLogClient() {
   const [logs, setLogs] = useState([]);
   const [connected, setConnected] = useState(false);
+  const [tab, setTab] = useState("insights");
   const logRef = useRef(null);
 
   const handleClear = async () => {
@@ -69,28 +71,50 @@ export default function ConsoleLogClient() {
   }, [logs]);
 
   return (
-    <div className="">
-      <Card>
-        <div className="flex items-center justify-end px-4 pt-3 pb-2">
-          <Button size="sm" variant="outline" icon="delete" onClick={handleClear}>
-            Clear
-          </Button>
-        </div>
-        <div
-          ref={logRef}
-          className="bg-black rounded-b-lg p-4 text-xs font-mono h-[calc(100vh-220px)] overflow-y-auto"
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-1 rounded-lg border border-border bg-bg-alt p-1 self-start">
+        <button
+          onClick={() => setTab("insights")}
+          className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-sm font-medium transition-colors ${tab === "insights" ? "bg-primary text-white shadow-sm" : "text-text-muted hover:text-text hover:bg-bg-alt"}`}
         >
-          {logs.length === 0 ? (
-            <span className="text-text-muted">No console logs yet.</span>
-          ) : (
-            <div className="space-y-0.5">
-              {logs.map((line, i) => (
-                <div key={i}>{colorLine(line)}</div>
-              ))}
-            </div>
-          )}
-        </div>
-      </Card>
+          <span className="material-symbols-outlined text-[16px]">insights</span>
+          Insights
+        </button>
+        <button
+          onClick={() => setTab("live")}
+          className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-sm font-medium transition-colors ${tab === "live" ? "bg-primary text-white shadow-sm" : "text-text-muted hover:text-text hover:bg-bg-alt"}`}
+        >
+          <span className="material-symbols-outlined text-[16px]">terminal</span>
+          Live Log
+          <span className={`ml-1 h-1.5 w-1.5 rounded-full ${connected ? "bg-success" : "bg-danger"}`} />
+        </button>
+      </div>
+
+      {tab === "insights" ? (
+        <LogInsights />
+      ) : (
+        <Card>
+          <div className="flex items-center justify-end px-4 pt-3 pb-2">
+            <Button size="sm" variant="outline" icon="delete" onClick={handleClear}>
+              Clear
+            </Button>
+          </div>
+          <div
+            ref={logRef}
+            className="bg-black rounded-b-lg p-4 text-xs font-mono h-[calc(100vh-220px)] overflow-y-auto"
+          >
+            {logs.length === 0 ? (
+              <span className="text-text-muted">No console logs yet.</span>
+            ) : (
+              <div className="space-y-0.5">
+                {logs.map((line, i) => (
+                  <div key={i}>{colorLine(line)}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
     </div>
   );
 }
