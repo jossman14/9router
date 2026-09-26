@@ -279,6 +279,9 @@ export async function canAccessDetailPayloads(request) {
   return isLocalRequest(request) || await hasValidCliToken(request);
 }
 
+// Shared with src/proxy.js — the mimo login branch must respect dashboard auth.
+export { isAuthenticated };
+
 export const __test__ = {
   isLocalRequest,
   isPublicLlmApi,
