@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { expectedVendor, detectVendor, judgeMask } from "@/lib/modelMask.js";
+import { expectedVendor, detectVendor, judgeMask, clusterBackends } from "@/lib/modelMask.js";
 
 const probe = (over = {}) => ({ ok: true, requested: "cc/claude-sonnet-4-5", returnedModel: "claude-sonnet-4-5", promptTokens: 120, reply: '{"vendor":"Anthropic","model":"Claude"}', ...over });
 
@@ -50,5 +50,28 @@ describe("model mask detection", () => {
 
   it("returns unknown when nothing can be checked", () => {
     expect(judgeMask(probe({ requested: "srb/auto", returnedModel: "auto", reply: "hello" })).verdict).toBe("unknown");
+  });
+
+  it("splits a pooled alias into backends by claimed vendor and hidden-prompt size", () => {
+    const s = (promptTokens, reply) => probe({ requested: "srb/auto", returnedModel: "auto", promptTokens, reply });
+    const samples = [
+      s(156, '{"vendor":"OpenAI"}'), s(156, '{"vendor":"OpenAI"}'),
+      s(161, '{"vendor":"Shanghai Artificial Intelligence Laboratory"}'),
+      s(16091, '{"vendor":"Anthropic"}'), s(16091, '{"vendor":"Anthropic"}'),
+      s(161, ""), { ok: false, error: "timeout" },
+    ];
+    const backends = clusterBackends(samples);
+    expect(backends.map((b) => [b.vendor, b.count])).toEqual([["openai", 2], ["anthropic", 2], ["shanghai-ai-lab", 1]]);
+    expect(backends[1].promptTokens).toEqual({ min: 16091, max: 16091 });
+
+    const r = judgeMask(samples[0], null, samples);
+    expect(r.verdict).toBe("masked");
+    expect(r.checks.find((c) => c.id === "consistency").pass).toBe(false);
+  });
+
+  it("treats steady samples from one backend as consistent", () => {
+    const samples = [probe(), probe(), probe({ promptTokens: 121 })];
+    expect(clusterBackends(samples)).toHaveLength(1);
+    expect(judgeMask(samples[0], null, samples).verdict).toBe("genuine");
   });
 });

@@ -71,17 +71,50 @@ function tokenizerCheck(probe, reference) {
   return { id: "tokenizer", label: "Tokenizer fingerprint", pass: drift <= TOKENIZER_TOLERANCE, detail: `${a} vs reference ${b} prompt tokens${hidden}` };
 }
 
-export function judgeMask(probe, reference = null) {
+// A pooled alias (e.g. "srb/auto") answers each request from a different
+// backend. Samples split on the vendor a model claims and, within a vendor,
+// on hidden-prompt size (a 1.5× jump in prompt tokens for the same input).
+// Unanswered or vendorless samples are left out: they carry no signal.
+export function clusterBackends(samples) {
+  const groups = [];
+  for (const s of samples || []) {
+    const vendor = s?.ok ? detectVendor(s.reply) : null;
+    if (!vendor || typeof s.promptTokens !== "number") continue;
+    const t = s.promptTokens;
+    const g = groups.find((x) => x.vendor === vendor
+      && Math.max(t, x.promptTokens.min) <= Math.min(t, x.promptTokens.min) * HIDDEN_PROMPT_RATIO);
+    if (g) {
+      g.count++;
+      g.promptTokens = { min: Math.min(g.promptTokens.min, t), max: Math.max(g.promptTokens.max, t) };
+    } else {
+      groups.push({ vendor, count: 1, promptTokens: { min: t, max: t }, reply: s.reply });
+    }
+  }
+  return groups.sort((a, b) => b.count - a.count);
+}
+
+function consistencyCheck(samples) {
+  if (!samples || samples.length < 2) return null;
+  const backends = clusterBackends(samples);
+  const detail = backends.length
+    ? backends.map((b) => `${b.vendor} ×${b.count} (${b.promptTokens.min}${b.promptTokens.max !== b.promptTokens.min ? `–${b.promptTokens.max}` : ""} tok)`).join(", ")
+    : "no sample named a vendor";
+  const pass = backends.length ? backends.length === 1 : null;
+  return { id: "consistency", label: `Backend consistency (${samples.length} samples)`, pass, detail: pass === false ? `${backends.length} different backends: ${detail}` : detail };
+}
+
+export function judgeMask(probe, reference = null, samples = null) {
   // Router aliases like "srb/auto" name no vendor; then the upstream's echoed
   // model is the claim to verify, so only the identity check can judge it.
   const named = expectedVendor(probe.requested);
   const expected = named || expectedVendor(probe.returnedModel);
-  const checks = [returnedCheck(probe, named), identityCheck(probe, expected), tokenizerCheck(probe, reference)];
+  const checks = [returnedCheck(probe, named), identityCheck(probe, expected), tokenizerCheck(probe, reference), consistencyCheck(samples)].filter(Boolean);
   const fails = checks.filter((c) => c.pass === false);
   const passes = checks.filter((c) => c.pass === true);
 
   let verdict = "unknown";
-  if (fails.some((c) => c.id === "tokenizer") || fails.length >= 2) verdict = "masked";
+  // A pool of backends behind one name is masking by definition.
+  if (fails.some((c) => c.id === "tokenizer" || c.id === "consistency") || fails.length >= 2) verdict = "masked";
   else if (fails.length === 1) verdict = "suspicious";
   else if (passes.length) verdict = "genuine";
 

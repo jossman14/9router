@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getInternalHeaders } from "../test/ping";
-import { judgeMask } from "@/lib/modelMask.js";
+import { judgeMask, clusterBackends } from "@/lib/modelMask.js";
 import { BUFFER_TOKENS } from "open-sse/utils/usageTracking.js";
 import { SAAS_MODE } from "@/lib/saas/config.js";
 import { getSessionUser } from "@/lib/saas/session.js";
@@ -57,7 +57,25 @@ async function adminProbeHeaders(user) {
   return headers;
 }
 
-// POST /api/models/mask-check - { model, reference? } → verdict + per-signal checks
+const MAX_SAMPLES = 10;
+const SAMPLE_CONCURRENCY = 3;
+
+// Repeat the probe to expose pooled aliases; a small worker pool keeps one
+// check from flooding the upstream.
+async function probeMany(model, headers, n) {
+  const results = new Array(n);
+  let next = 0;
+  const worker = async () => {
+    while (next < n) {
+      const i = next++;
+      results[i] = await probe(model, headers);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(SAMPLE_CONCURRENCY, n) }, worker));
+  return results;
+}
+
+// POST /api/models/mask-check - { model, reference?, samples? } → verdict + per-signal checks
 export async function POST(request) {
   let headers;
   if (SAAS_MODE) {
@@ -68,13 +86,17 @@ export async function POST(request) {
   } else {
     headers = await getInternalHeaders();
   }
-  const { model, reference } = await request.json().catch(() => ({}));
+  const { model, reference, samples } = await request.json().catch(() => ({}));
+  const n = Math.min(MAX_SAMPLES, Math.max(1, Number.parseInt(samples, 10) || 1));
   if (typeof model !== "string" || !model.trim()) return NextResponse.json({ error: "Model required" }, { status: 400 });
 
   const ref = typeof reference === "string" && reference.trim() ? reference.trim() : null;
-  const [target, refProbe] = await Promise.all([probe(model.trim(), headers), ref ? probe(ref, headers) : null]);
-  if (!target.ok) return NextResponse.json({ target, reference: refProbe, verdict: "error", checks: [] });
+  const [runs, refProbe] = await Promise.all([probeMany(model.trim(), headers, n), ref ? probe(ref, headers) : null]);
+  const target = runs.find((r) => r.ok) || runs[0];
+  const sampleStats = { total: n, ok: runs.filter((r) => r.ok).length };
+  if (!target.ok) return NextResponse.json({ target, reference: refProbe, samples: sampleStats, verdict: "error", checks: [] });
 
-  const result = judgeMask(target, refProbe?.ok ? refProbe : null);
-  return NextResponse.json({ target, reference: refProbe, ...result });
+  const result = judgeMask(target, refProbe?.ok ? refProbe : null, n > 1 ? runs : null);
+  const backends = n > 1 ? clusterBackends(runs) : [];
+  return NextResponse.json({ target, reference: refProbe, samples: sampleStats, backends, ...result });
 }
