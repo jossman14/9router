@@ -44,7 +44,8 @@ export async function getInternalHeaders() {
   let apiKey = null;
   try {
     const keys = await getApiKeys();
-    apiKey = keys.find((k) => k.isActive !== false)?.key || null;
+    // SaaS rows expose key: null (hash-only), so only operator keys can sign internal probes.
+    apiKey = keys.find((k) => k.isActive !== false && k.key)?.key || null;
   } catch {}
 
   const headers = { "Content-Type": "application/json" };

@@ -4,7 +4,7 @@ import { createErrorResult } from "../../utils/error.js";
 import { HTTP_STATUS } from "../../config/runtimeConfig.js";
 import { FORMATS } from "../../translator/formats.js";
 import { PROVIDERS } from "../../config/providers.js";
-import { buildRequestDetail, extractRequestConfig, saveUsageStats, clientSource, formatDoneLine, buildProviderHeaders } from "./requestDetail.js";
+import { buildRequestDetail, extractRequestConfig, saveUsageStats, servedModelOf, clientSource, formatDoneLine, buildProviderHeaders } from "./requestDetail.js";
 import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
 
 // Responses-API providers (e.g. codex) may emit SSE without content-type + use Responses output shape
@@ -207,7 +207,7 @@ export async function handleForcedSSEToJson({ providerResponse, providerHeaders,
 
       const usage = jsonResponse.usage || {};
       appendLog({ tokens: usage, status: "200 OK" });
-      saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, source: clientSource(clientRawRequest), silent: true });
+      saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, source: clientSource(clientRawRequest), servedModel: servedModelOf(jsonResponse), silent: true });
       try {
         recordEvent({ level: "info", tag: "CHAT", provider, model, apiKey, source: clientSource(clientRawRequest), phase: "done", status: "ok", code: 200, message: "JSON (forced SSE) done" });
       } catch { /* never break a request */ }
@@ -331,7 +331,7 @@ export async function handleForcedSSEToJson({ providerResponse, providerHeaders,
 
     const usage = parsed.usage || {};
     appendLog({ tokens: usage, status: "200 OK" });
-    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, source: clientSource(clientRawRequest), silent: true });
+    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, source: clientSource(clientRawRequest), servedModel: servedModelOf(parsed), silent: true });
     try {
       recordEvent({ level: "info", tag: "CHAT", provider, model, apiKey, source: clientSource(clientRawRequest), phase: "done", status: "ok", code: 200, message: "JSON (forced SSE) done" });
     } catch { /* never break a request */ }

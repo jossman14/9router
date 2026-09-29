@@ -6,7 +6,7 @@ import { PROVIDERS } from "../../config/providers.js";
 import { HTTP_STATUS, STREAM_STALL_TIMEOUT_MS } from "../../config/runtimeConfig.js";
 import { buildAbortedResponsesTerminalBytes } from "../../utils/responsesStreamHelpers.js";
 import { buildStreamErrorBytes } from "../../utils/streamHelpers.js";
-import { buildRequestDetail, extractRequestConfig, saveUsageStats, clientSource, formatDoneLine, buildProviderHeaders } from "./requestDetail.js";
+import { buildRequestDetail, extractRequestConfig, saveUsageStats, servedModelOf, clientSource, formatDoneLine, buildProviderHeaders } from "./requestDetail.js";
 import { saveRequestDetail } from "@/lib/usageDb.js";
 import { recordEvent } from "@/lib/consoleEventBuffer";
 import { SSE_HEADERS_CORS as SSE_HEADERS } from "../../utils/sseConstants.js";
@@ -150,7 +150,7 @@ export function buildOnStreamComplete({ provider, model, connectionId, apiKey, r
     });
 
     // Persist stream usage to DB (no console line; the "📊 done" line below is authoritative)
-    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, source: clientSource(clientRawRequest), label: "STREAM USAGE", silent: true });
+    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, source: clientSource(clientRawRequest), servedModel: servedModelOf(providerResponse), label: "STREAM USAGE", silent: true });
     try {
       recordEvent({
         level: "info", tag: "CHAT", provider, model, apiKey,

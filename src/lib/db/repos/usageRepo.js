@@ -392,6 +392,38 @@ function loadDaysInRange(adapter, maxDays) {
   return adapter.all(`SELECT dateKey, data FROM usageDaily WHERE dateKey >= ? ORDER BY dateKey ASC`, [cutoffKey]);
 }
 
+// Requested → served model pairs. Router aliases like "srb/auto" hide which
+// model actually answered; the upstream's echoed `model` (meta.servedModel)
+// is the only record of it, so this reads raw history rather than the daily
+// rollups, which never stored it.
+export async function getServedModels(period = "7d") {
+  const db = await getAdapter();
+  let cutoff = "";
+  if (period === "today") {
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    cutoff = startOfDay.toISOString();
+  } else if (PERIOD_MS[period]) {
+    cutoff = new Date(Date.now() - PERIOD_MS[period]).toISOString();
+  }
+  const rows = db.all(
+    `SELECT provider, model, connectionId, promptTokens, completionTokens, timestamp, meta FROM usageHistory
+     WHERE timestamp >= ? AND meta LIKE '%"servedModel"%'`,
+    [cutoff]
+  );
+  const groups = {};
+  for (const r of rows) {
+    const servedModel = parseJson(r.meta, {})?.servedModel;
+    if (!servedModel) continue;
+    const key = `${r.connectionId}|${r.provider}|${r.model}|${servedModel}`;
+    const g = groups[key] ||= { provider: r.provider, connectionId: r.connectionId || null, model: r.model, servedModel, requests: 0, totalTokens: 0, lastUsed: r.timestamp };
+    g.requests++;
+    g.totalTokens += (r.promptTokens || 0) + (r.completionTokens || 0);
+    if (r.timestamp > g.lastUsed) g.lastUsed = r.timestamp;
+  }
+  return Object.values(groups).sort((a, b) => b.requests - a.requests);
+}
+
 export async function getUsageStats(period = "all") {
   const db = await getAdapter();
 

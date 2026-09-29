@@ -52,7 +52,7 @@ function ProbeDetail({ title, probe }) {
   );
 }
 
-export default function ModelCheckPage() {
+export default function MaskCheck() {
   const [providers, setProviders] = useState([]);
   const [model, setModel] = useState("");
   const [reference, setReference] = useState("");
@@ -85,9 +85,9 @@ export default function ModelCheckPage() {
   const v = result && VERDICTS[result.verdict];
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div className="space-y-4">
       <Card padding="md">
-        <h1 className="text-base font-semibold text-text-main">Model Mask Check</h1>
+        <h2 className="text-sm font-semibold text-text-main">Model Mask Check</h2>
         <p className="text-xs text-text-muted mt-1">
           Checks whether a provider really serves the model it advertises. Three signals: the model name the upstream
           echoes back, the vendor the model says it is, and the prompt-token count against a reference model you trust.

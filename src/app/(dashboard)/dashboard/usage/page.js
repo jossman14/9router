@@ -5,6 +5,8 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { RequestLogger, CardSkeleton, SegmentedControl } from "@/shared/components";
 import UsageStats from "@/shared/components/UsageStats";
 import RequestDetailsTab from "./components/RequestDetailsTab";
+import ServedModels from "./components/ServedModels";
+import MaskCheck from "./components/MaskCheck";
 
 const PERIODS = [
   { value: "today", label: "Today" },
@@ -68,6 +70,8 @@ function UsageContent() {
       {activeTab === "overview" && (
         <Suspense fallback={<CardSkeleton />}>
           <UsageStats period={period} setPeriod={setPeriod} hidePeriodSelector />
+          <ServedModels period={period} />
+          <MaskCheck />
         </Suspense>
       )}
       {activeTab === "logs" && <RequestLogger />}

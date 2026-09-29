@@ -163,7 +163,16 @@ export function formatDoneLine({ usage, latency }) {
   return `DONE ${latency?.total ?? 0}ms${ttftStr} · ${inStr} · OUT ${outTok}`;
 }
 
-export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, endpoint, source, label = "USAGE", silent = false }) {
+// Model the upstream says answered: `model` on OpenAI/Claude JSON, `modelVersion`
+// on Gemini. Raw SSE text is scanned for the first such field instead of parsed.
+export function servedModelOf(response) {
+  if (!response) return null;
+  if (typeof response === "object") return response.model || response.modelVersion || response.response?.model || null;
+  const match = String(response).match(/"(?:model|modelVersion)"\s*:\s*"([^"]+)"/);
+  return match ? match[1] : null;
+}
+
+export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, endpoint, source, servedModel = null, label = "USAGE", silent = false }) {
   if (!tokens || typeof tokens !== "object") return;
 
   const inTokens = tokens.input_tokens ?? tokens.prompt_tokens ?? 0;
@@ -192,6 +201,7 @@ export function saveUsageStats({ provider, model, tokens, connectionId, apiKey, 
     connectionId: connectionId || undefined,
     apiKey: apiKey || undefined,
     endpoint: endpoint || null,
-    source: source || "local"
+    source: source || "local",
+    meta: { source: source || "local", ...(servedModel && { servedModel }) }
   }).catch(() => {});
 }

@@ -8,7 +8,7 @@ import { upstreamResponseHeaders } from "../../utils/upstreamHeaders.js";
 import { HTTP_STATUS } from "../../config/runtimeConfig.js";
 import { parseSSEToOpenAIResponse } from "./sseToJsonHandler.js";
 import { unwrapClineEnvelope } from "../../shared/clineEnvelope.js";
-import { buildRequestDetail, extractRequestConfig, extractUsageFromResponse, saveUsageStats, clientSource, formatDoneLine, buildProviderHeaders } from "./requestDetail.js";
+import { buildRequestDetail, extractRequestConfig, extractUsageFromResponse, saveUsageStats, servedModelOf, clientSource, formatDoneLine, buildProviderHeaders } from "./requestDetail.js";
 import { appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
 import { recordEvent } from "@/lib/consoleEventBuffer";
 import { decloakToolNames } from "../../utils/claudeCloaking.js";
@@ -330,7 +330,7 @@ export async function handleNonStreamingResponse({ providerResponse, provider, p
 
   const usage = extractUsageFromResponse(responseBody);
   appendLog({ tokens: usage, status: "200 OK" });
-  saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, source: clientSource(clientRawRequest), silent: true });
+  saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, source: clientSource(clientRawRequest), servedModel: servedModelOf(responseBody), silent: true });
   try {
     recordEvent({
       level: "info", tag: "CHAT", provider, model, apiKey,
