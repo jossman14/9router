@@ -231,40 +231,51 @@ const PERIODS = [
   { value: "all", label: "All" },
 ];
 
-// What actually answered a requested model: the model the upstream echoed
-// (when it names one) and, for aliases that hide it, the last Mask Check.
+// Model the upstream echoed back, when it differs from the one requested.
 function ServedLine({ item, served }) {
   const key = `${item.rawModel}|${item.providerId}`;
   const echoed = (served?.items || []).filter((r) => `${r.model}|${r.provider}` === key && r.servedModel !== r.model);
-  const check = served?.maskChecks?.[key];
-  if (!echoed.length && !check) return null;
+  if (!echoed.length) return null;
   const want = expectedVendor(item.rawModel);
   return (
-    <div className="text-[11px] font-normal text-text-muted mt-0.5 space-y-0.5">
-      {echoed.length > 0 && (
-        <div>
-          served:{" "}
-          {echoed.map((r, i) => {
-            const got = expectedVendor(r.servedModel);
-            return (
-              <span key={r.servedModel} className={want && got && want !== got ? "text-red-500" : "text-text-main"}>
-                {i > 0 && ", "}{r.servedModel} ×{fmt(r.requests)}
-              </span>
-            );
-          })}
-        </div>
-      )}
-      {check && (
-        <div title={`Mask Check ${fmtTime(check.checkedAt)}`}>
-          detected:{" "}
-          <span className={check.verdict === "masked" ? "text-red-500" : "text-text-main"}>
-            {check.backends.map((b) => `${b.vendor} ×${b.count}`).join(", ")}
-          </span>{" "}
-          · Mask Check {fmtTime(check.checkedAt)}
-        </div>
-      )}
+    <div className="text-[11px] font-normal text-text-muted mt-0.5">
+      served:{" "}
+      {echoed.map((r, i) => {
+        const got = expectedVendor(r.servedModel);
+        return (
+          <span key={r.servedModel} className={want && got && want !== got ? "text-red-500" : "text-text-main"}>
+            {i > 0 && ", "}{r.servedModel} ×{fmt(r.requests)}
+          </span>
+        );
+      })}
     </div>
   );
+}
+
+const SPLIT_COUNTS = ["requests", "promptTokens", "completionTokens", "cachedTokens", "totalTokens"];
+const SPLIT_COSTS = ["cost", "totalCost", "inputCost", "cachedCost", "outputCost"];
+
+// Aliases like srbyte "auto" never say which backend answered a request, so
+// per-backend usage can't be metered. ponytail: split each row by the backend
+// ratio of its last Mask Check — an estimate that is only as good as the
+// sample count; rerun Mask Check with more samples to tighten it.
+function withBackendEstimates(groups, maskChecks) {
+  if (!maskChecks) return groups;
+  return groups.map((group) => ({
+    ...group,
+    items: group.items.flatMap((item) => {
+      const check = maskChecks[`${item.rawModel}|${item.providerId}`];
+      const sampled = check?.backends?.reduce((n, b) => n + b.count, 0);
+      if (!sampled) return [item];
+      const estimates = check.backends.map((b) => ({
+        ...Object.fromEntries(SPLIT_COUNTS.map((f) => [f, Math.round((item[f] || 0) * b.count / sampled)])),
+        ...Object.fromEntries(SPLIT_COSTS.map((f) => [f, (item[f] || 0) * b.count / sampled])),
+        key: `${item.key}|est|${b.vendor}`,
+        estimate: { vendor: b.vendor, count: b.count, sampled, checkedAt: check.checkedAt, masked: check.verdict === "masked" },
+      }));
+      return [item, ...estimates];
+    }),
+  }));
 }
 
 export default function UsageStats({ period: periodProp, setPeriod: setPeriodProp, hidePeriodSelector = false } = {}) {
@@ -397,7 +408,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
         const pendingMap = stats.pending?.byModel || {};
         return {
           columns: MODEL_COLUMNS,
-          groupedData: groupDataByKey(sortData(stats.byModel, pendingMap, sortBy, sortOrder), "rawModel"),
+          groupedData: withBackendEstimates(groupDataByKey(sortData(stats.byModel, pendingMap, sortBy, sortOrder), "rawModel"), served?.maskChecks),
           storageKey: "usage-stats:expanded-models",
           emptyMessage: "No usage recorded yet.",
           renderSummaryCells: (group) => (
@@ -407,7 +418,17 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(group.summary.lastUsed)}</td>
             </>
           ),
-          renderDetailCells: (item) => (
+          renderDetailCells: (item) => item.estimate ? (
+            <>
+              <td className="px-6 py-2 pl-12 text-xs">
+                <span className={item.estimate.masked ? "text-red-500" : "text-text-main"}>↳ {item.estimate.vendor}</span>
+                <span className="text-text-muted"> · {item.estimate.count}/{item.estimate.sampled} samples</span>
+              </td>
+              <td className="px-6 py-2"><Badge variant="warning" size="sm">estimate</Badge></td>
+              <td className="px-6 py-2 text-right text-xs text-text-muted">≈{fmt(item.requests)}</td>
+              <td className="px-6 py-2 text-right text-xs text-text-muted whitespace-nowrap">Mask Check {fmtTime(item.estimate.checkedAt)}</td>
+            </>
+          ) : (
             <>
               <td className={`px-6 py-3 font-medium transition-colors ${item.pending > 0 ? "text-primary" : ""}`}>
                 {item.rawModel}
