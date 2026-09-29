@@ -5,7 +5,8 @@ import { BUFFER_TOKENS } from "open-sse/utils/usageTracking.js";
 import { SAAS_MODE } from "@/lib/saas/config.js";
 import { getSessionUser } from "@/lib/saas/session.js";
 import { UPDATER_CONFIG } from "@/shared/constants/config";
-import { getApiKeys, revealApiKey } from "@/lib/localDb";
+import { getApiKeys, revealApiKey, getSettings, updateSettings } from "@/lib/localDb";
+import { getModelInfo } from "@/sse/services/model.js";
 
 // Fixed wording on purpose: the tokenizer check compares prompt_tokens of the
 // same input across two models, so this text must never vary between probes.
@@ -75,6 +76,19 @@ async function probeMany(model, headers, n) {
   return results;
 }
 
+// Upstreams like srbyte echo the alias ("auto") as the served model, so the
+// last sampled result is the only record of what actually sits behind it.
+// Keyed like usage rows (`model|providerId`) so the Usage table can join it.
+// ponytail: read-merge-write on one settings key; two checks finishing at the
+// same instant can drop one result — rerun it.
+async function saveMaskResult(requested, verdict, backends) {
+  const info = await getModelInfo(requested).catch(() => null);
+  if (!info?.provider) return;
+  const { maskChecks = {} } = await getSettings();
+  const entry = { checkedAt: new Date().toISOString(), verdict, backends: backends.map(({ vendor, count }) => ({ vendor, count })) };
+  await updateSettings({ maskChecks: { ...maskChecks, [`${info.model}|${info.provider}`]: entry } });
+}
+
 // POST /api/models/mask-check - { model, reference?, samples? } → verdict + per-signal checks
 export async function POST(request) {
   let headers;
@@ -98,5 +112,6 @@ export async function POST(request) {
 
   const result = judgeMask(target, refProbe?.ok ? refProbe : null, n > 1 ? runs : null);
   const backends = n > 1 ? clusterBackends(runs) : [];
+  if (backends.length) await saveMaskResult(model.trim(), result.verdict, backends).catch(() => {});
   return NextResponse.json({ target, reference: refProbe, samples: sampleStats, backends, ...result });
 }

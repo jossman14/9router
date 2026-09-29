@@ -554,7 +554,7 @@ export async function getUsageStats(period = "all") {
         const statsKey = provider ? `${rawModel} (${provider})` : rawModel;
         const providerDisplayName = providerNodeNameMap[provider] || provider;
         if (!stats.byModel[statsKey]) {
-          stats.byModel[statsKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, rawModel, provider: providerDisplayName, lastUsed: dateKey };
+          stats.byModel[statsKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, rawModel, provider: providerDisplayName, providerId: provider, lastUsed: dateKey };
         }
         stats.byModel[statsKey].requests += m.requests || 0;
         stats.byModel[statsKey].promptTokens += m.promptTokens || 0;
@@ -730,7 +730,7 @@ export async function getUsageStats(period = "all") {
 
       const modelKey = r.provider ? `${r.model} (${r.provider})` : r.model;
       if (!stats.byModel[modelKey]) {
-        stats.byModel[modelKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, rawModel: r.model, provider: providerDisplayName, lastUsed: r.timestamp };
+        stats.byModel[modelKey] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0, rawModel: r.model, provider: providerDisplayName, providerId: r.provider, lastUsed: r.timestamp };
       }
       stats.byModel[modelKey].requests++;
       stats.byModel[modelKey].promptTokens += promptTokens;

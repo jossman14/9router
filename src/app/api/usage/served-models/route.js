@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getServedModels } from "@/lib/usageDb";
-import { getProviderConnections, getProviderNodes } from "@/lib/localDb";
+import { getProviderConnections, getProviderNodes, getSettings } from "@/lib/localDb";
 
 const VALID_PERIODS = new Set(["today", "24h", "7d", "30d", "60d", "all"]);
 
@@ -12,10 +12,11 @@ export async function GET(request) {
     const period = new URL(request.url).searchParams.get("period") || "7d";
     if (!VALID_PERIODS.has(period)) return NextResponse.json({ error: "Invalid period" }, { status: 400 });
 
-    const [rows, connections, nodes] = await Promise.all([
+    const [rows, connections, nodes, settings] = await Promise.all([
       getServedModels(period),
       getProviderConnections().catch(() => []),
       getProviderNodes().catch(() => []),
+      getSettings().catch(() => ({})),
     ]);
     const connName = Object.fromEntries(connections.map((c) => [c.id, c.name]));
     const nodeName = Object.fromEntries(nodes.map((n) => [n.id, n.name]));
@@ -23,7 +24,7 @@ export async function GET(request) {
       ...r,
       providerName: connName[r.connectionId] || nodeName[r.provider] || r.provider,
     }));
-    return NextResponse.json({ items });
+    return NextResponse.json({ items, maskChecks: settings.maskChecks || {} });
   } catch (error) {
     console.error("[API] Failed to get served models:", error);
     return NextResponse.json({ error: "Failed to fetch served models" }, { status: 500 });

@@ -14,6 +14,7 @@ import Badge from "./Badge";
 import Card from "./Card";
 import OverviewCards from "@/app/(dashboard)/dashboard/usage/components/OverviewCards";
 import UsageTable, { fmt, fmtTime } from "@/app/(dashboard)/dashboard/usage/components/UsageTable";
+import { expectedVendor } from "@/lib/modelMask.js";
 import dynamic from "next/dynamic";
 // Lazy-load: keeps @xyflow/react and recharts out of the initial bundle
 const ProviderTopology = dynamic(() => import("@/app/(dashboard)/dashboard/usage/components/ProviderTopology"), { ssr: false });
@@ -230,6 +231,42 @@ const PERIODS = [
   { value: "all", label: "All" },
 ];
 
+// What actually answered a requested model: the model the upstream echoed
+// (when it names one) and, for aliases that hide it, the last Mask Check.
+function ServedLine({ item, served }) {
+  const key = `${item.rawModel}|${item.providerId}`;
+  const echoed = (served?.items || []).filter((r) => `${r.model}|${r.provider}` === key && r.servedModel !== r.model);
+  const check = served?.maskChecks?.[key];
+  if (!echoed.length && !check) return null;
+  const want = expectedVendor(item.rawModel);
+  return (
+    <div className="text-[11px] font-normal text-text-muted mt-0.5 space-y-0.5">
+      {echoed.length > 0 && (
+        <div>
+          served:{" "}
+          {echoed.map((r, i) => {
+            const got = expectedVendor(r.servedModel);
+            return (
+              <span key={r.servedModel} className={want && got && want !== got ? "text-red-500" : "text-text-main"}>
+                {i > 0 && ", "}{r.servedModel} ×{fmt(r.requests)}
+              </span>
+            );
+          })}
+        </div>
+      )}
+      {check && (
+        <div title={`Mask Check ${fmtTime(check.checkedAt)}`}>
+          detected:{" "}
+          <span className={check.verdict === "masked" ? "text-red-500" : "text-text-main"}>
+            {check.backends.map((b) => `${b.vendor} ×${b.count}`).join(", ")}
+          </span>{" "}
+          · Mask Check {fmtTime(check.checkedAt)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function UsageStats({ period: periodProp, setPeriod: setPeriodProp, hidePeriodSelector = false } = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -238,6 +275,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
   const sortOrder = searchParams.get("sortOrder") || "asc";
 
   const [stats, setStats] = useState(null);
+  const [served, setServed] = useState(null);
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
   const [tableView, setTableView] = useState("model");
@@ -290,6 +328,11 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
     } else {
       setFetching(true);
     }
+
+    fetch(`/api/usage/served-models?period=${period}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then(setServed)
+      .catch(() => {});
 
     fetch(`/api/usage/stats?period=${period}`)
       .then((r) => r.ok ? r.json() : null)
@@ -366,7 +409,10 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
           ),
           renderDetailCells: (item) => (
             <>
-              <td className={`px-6 py-3 font-medium transition-colors ${item.pending > 0 ? "text-primary" : ""}`}>{item.rawModel}</td>
+              <td className={`px-6 py-3 font-medium transition-colors ${item.pending > 0 ? "text-primary" : ""}`}>
+                {item.rawModel}
+                <ServedLine item={item} served={served} />
+              </td>
               <td className="px-6 py-3"><Badge variant={item.pending > 0 ? "primary" : "neutral"} size="sm">{item.provider}</Badge></td>
               <td className="px-6 py-3 text-right">{fmt(item.requests)}</td>
               <td className="px-6 py-3 text-right text-text-muted whitespace-nowrap">{fmtTime(item.lastUsed)}</td>
@@ -484,7 +530,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
         };
       }
     }
-  }, [stats, tableView, sortBy, sortOrder]);
+  }, [stats, served, tableView, sortBy, sortOrder]);
 
   if (!stats && !loading) return <div className="text-text-muted">Failed to load usage statistics.</div>;
 
