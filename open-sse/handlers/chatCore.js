@@ -316,7 +316,9 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   }
 
   // Skill auto-select: match the prompt against ~/.claude/skills and inject what fits
-  if (process.env.SKILL_AUTOSELECT === "true") {
+  // Probes (mask check) opt out: injected skills would skew both the identity
+  // answer and the prompt-token fingerprint they measure.
+  if (process.env.SKILL_AUTOSELECT === "true" && !clientRawRequest?.headers?.["x-9r-no-skills"]) {
     const picked = injectSkills(translatedBody, finalFormat, {
       limit: Number(process.env.SKILL_AUTOSELECT_LIMIT) || 2,
     });

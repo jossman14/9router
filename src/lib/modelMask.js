@@ -17,11 +17,13 @@ const VENDORS = [
   { id: "mistral", re: /mistral|mixtral|codestral|devstral/i },
   { id: "minimax", re: /minimax|abab/i },
   { id: "xiaomi", re: /mimo/i },
+  { id: "shanghai-ai-lab", re: /internlm|intern-s\d|shanghai (?:ai|artificial intelligence) lab|上海人工智能实验室/i },
 ];
 
 // Same tokenizer + same input should land within a couple of tokens; the slack
 // absorbs chat-template differences between providers of the same family.
 const TOKENIZER_TOLERANCE = 0.03;
+const HIDDEN_PROMPT_RATIO = 1.5;
 
 const baseName = (model) => String(model || "").split("/").pop().toLowerCase();
 
@@ -63,7 +65,10 @@ function tokenizerCheck(probe, reference) {
     return { id: "tokenizer", label: "Tokenizer fingerprint", pass: null, detail: reference ? "usage not reported" : "no reference model" };
   }
   const drift = Math.abs(a - b) / Math.max(a, b, 1);
-  return { id: "tokenizer", label: "Tokenizer fingerprint", pass: drift <= TOKENIZER_TOLERANCE, detail: `${a} vs reference ${b} prompt tokens` };
+  // Far more tokens than any tokenizer explains means the upstream wraps the
+  // prompt in its own hidden system prompt — itself a sign of a disguised model.
+  const hidden = a > b * HIDDEN_PROMPT_RATIO ? ` — ~${a - b} extra tokens: upstream injects a hidden prompt` : "";
+  return { id: "tokenizer", label: "Tokenizer fingerprint", pass: drift <= TOKENIZER_TOLERANCE, detail: `${a} vs reference ${b} prompt tokens${hidden}` };
 }
 
 export function judgeMask(probe, reference = null) {

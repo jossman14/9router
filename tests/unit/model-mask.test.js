@@ -15,6 +15,7 @@ describe("model mask detection", () => {
     expect(detectVendor("I am Claude, made by Anthropic")).toBe("anthropic");
     expect(detectVendor("我是通义千问 Qwen")).toBe("alibaba");
     expect(detectVendor("no idea")).toBeNull();
+    expect(detectVendor('{"vendor":"Shanghai Artificial Intelligence Laboratory","model":"Atria"}')).toBe("shanghai-ai-lab");
   });
 
   it("passes a consistent genuine model", () => {
@@ -40,6 +41,11 @@ describe("model mask detection", () => {
     const auto = { requested: "srb/auto", returnedModel: "claude-sonnet-4-5" };
     expect(judgeMask(probe({ ...auto, reply: "I am Claude" })).verdict).toBe("genuine");
     expect(judgeMask(probe({ ...auto, reply: "I am Qwen" })).verdict).toBe("suspicious");
+  });
+
+  it("names a hidden upstream prompt when the target uses far more tokens", () => {
+    const r = judgeMask(probe({ promptTokens: 156 }), probe({ promptTokens: 43 }));
+    expect(r.checks.find((c) => c.id === "tokenizer").detail).toContain("~113 extra tokens");
   });
 
   it("returns unknown when nothing can be checked", () => {
