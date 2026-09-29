@@ -14,7 +14,7 @@ import Badge from "./Badge";
 import Card from "./Card";
 import OverviewCards from "@/app/(dashboard)/dashboard/usage/components/OverviewCards";
 import UsageTable, { fmt, fmtTime } from "@/app/(dashboard)/dashboard/usage/components/UsageTable";
-import { expectedVendor } from "@/lib/modelMask.js";
+import { expectedVendor, modelClaims } from "@/lib/modelMask.js";
 import dynamic from "next/dynamic";
 // Lazy-load: keeps @xyflow/react and recharts out of the initial bundle
 const ProviderTopology = dynamic(() => import("@/app/(dashboard)/dashboard/usage/components/ProviderTopology"), { ssr: false });
@@ -271,7 +271,7 @@ function withBackendEstimates(groups, maskChecks) {
         ...Object.fromEntries(SPLIT_COUNTS.map((f) => [f, Math.round((item[f] || 0) * b.count / sampled)])),
         ...Object.fromEntries(SPLIT_COSTS.map((f) => [f, (item[f] || 0) * b.count / sampled])),
         key: `${item.key}|est|${b.vendor}`,
-        estimate: { vendor: b.vendor, count: b.count, sampled, checkedAt: check.checkedAt, masked: check.verdict === "masked" },
+        estimate: { vendor: b.vendor, models: modelClaims(b), count: b.count, sampled, checkedAt: check.checkedAt, masked: check.verdict === "masked" },
       }));
       return [item, ...estimates];
     }),
@@ -423,6 +423,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
               <td className="px-6 py-2 pl-12 text-xs">
                 <span className={item.estimate.masked ? "text-red-500" : "text-text-main"}>↳ {item.estimate.vendor}</span>
                 <span className="text-text-muted"> · {item.estimate.count}/{item.estimate.sampled} samples</span>
+                <div className="text-[11px] text-text-muted pl-3">model: <span className="text-text-main">{item.estimate.models}</span></div>
               </td>
               <td className="px-6 py-2"><Badge variant="warning" size="sm">estimate</Badge></td>
               <td className="px-6 py-2 text-right text-xs text-text-muted">≈{fmt(item.requests)}</td>

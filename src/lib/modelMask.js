@@ -71,6 +71,17 @@ function tokenizerCheck(probe, reference) {
   return { id: "tokenizer", label: "Tokenizer fingerprint", pass: drift <= TOKENIZER_TOLERANCE, detail: `${a} vs reference ${b} prompt tokens${hidden}` };
 }
 
+const UNDISCLOSED = /^(?:unknown|not? ?(?:disclosed|specified|available|provided|sure)|n\/?a|none|null|undisclosed|-|\?+)$/i;
+
+// The model name a probe reply claims (`{"model":"..."}`), or null when the
+// model declined to say.
+export function claimedModel(reply) {
+  const name = String(reply || "").match(/"model"\s*:\s*"([^"]{1,80})"/)?.[1]?.trim();
+  return name && !UNDISCLOSED.test(name) ? name : null;
+}
+
+const tally = (counts, name) => (name ? { ...counts, [name]: (counts[name] || 0) + 1 } : counts);
+
 // A pooled alias (e.g. "srb/auto") answers each request from a different
 // backend. Samples split on the vendor a model claims and, within a vendor,
 // on hidden-prompt size (a 1.5× jump in prompt tokens for the same input).
@@ -85,12 +96,22 @@ export function clusterBackends(samples) {
       && Math.max(t, x.promptTokens.min) <= Math.min(t, x.promptTokens.min) * HIDDEN_PROMPT_RATIO);
     if (g) {
       g.count++;
+      g.models = tally(g.models, claimedModel(s.reply));
       g.promptTokens = { min: Math.min(g.promptTokens.min, t), max: Math.max(g.promptTokens.max, t) };
     } else {
-      groups.push({ vendor, count: 1, promptTokens: { min: t, max: t }, reply: s.reply });
+      groups.push({ vendor, count: 1, promptTokens: { min: t, max: t }, models: tally({}, claimedModel(s.reply)), reply: s.reply });
     }
   }
   return groups.sort((a, b) => b.count - a.count);
+}
+
+// "GPT-5 ×2, undisclosed ×1": what each sample in a backend cluster said it was.
+export function modelClaims(backend) {
+  const named = Object.entries(backend.models || {});
+  const unnamed = backend.count - named.reduce((n, [, c]) => n + c, 0);
+  const parts = named.sort((a, b) => b[1] - a[1]).map(([m, c]) => `${m} ×${c}`);
+  if (unnamed > 0) parts.push(`undisclosed ×${unnamed}`);
+  return parts.join(", ");
 }
 
 function consistencyCheck(samples) {

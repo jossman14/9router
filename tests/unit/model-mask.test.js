@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { expectedVendor, detectVendor, judgeMask, clusterBackends } from "@/lib/modelMask.js";
+import { expectedVendor, detectVendor, judgeMask, clusterBackends, claimedModel, modelClaims } from "@/lib/modelMask.js";
 
 const probe = (over = {}) => ({ ok: true, requested: "cc/claude-sonnet-4-5", returnedModel: "claude-sonnet-4-5", promptTokens: 120, reply: '{"vendor":"Anthropic","model":"Claude"}', ...over });
 
@@ -57,16 +57,28 @@ describe("model mask detection", () => {
     const samples = [
       s(156, '{"vendor":"OpenAI"}'), s(156, '{"vendor":"OpenAI"}'),
       s(161, '{"vendor":"Shanghai Artificial Intelligence Laboratory"}'),
-      s(16091, '{"vendor":"Anthropic"}'), s(16091, '{"vendor":"Anthropic"}'),
+      s(16091, '{"vendor":"Anthropic","model":"Claude Sonnet 5"}'), s(16091, '{"vendor":"Anthropic","model":"Claude Sonnet 5"}'),
       s(161, ""), { ok: false, error: "timeout" },
     ];
     const backends = clusterBackends(samples);
     expect(backends.map((b) => [b.vendor, b.count])).toEqual([["openai", 2], ["anthropic", 2], ["shanghai-ai-lab", 1]]);
     expect(backends[1].promptTokens).toEqual({ min: 16091, max: 16091 });
+    expect(backends[1].models).toEqual({ "Claude Sonnet 5": 2 });
+    expect(backends[0].models).toEqual({});
+    expect(modelClaims(backends[1])).toBe("Claude Sonnet 5 ×2");
+    expect(modelClaims(backends[0])).toBe("undisclosed ×2");
 
     const r = judgeMask(samples[0], null, samples);
     expect(r.verdict).toBe("masked");
     expect(r.checks.find((c) => c.id === "consistency").pass).toBe(false);
+  });
+
+  it("reads the claimed model name and ignores refusals", () => {
+    expect(claimedModel('{"vendor":"OpenAI","model":"GPT-5"}')).toBe("GPT-5");
+    expect(claimedModel('```json\n{"vendor": "Shanghai AI Lab", "model": "Atria"}\n```')).toBe("Atria");
+    for (const r of ['{"model":"unknown"}', '{"model":"not disclosed"}', '{"model":"not specified"}', '{"model":"N/A"}', "I am an assistant."]) {
+      expect(claimedModel(r)).toBeNull();
+    }
   });
 
   it("treats steady samples from one backend as consistent", () => {

@@ -85,7 +85,7 @@ async function saveMaskResult(requested, verdict, backends) {
   const info = await getModelInfo(requested).catch(() => null);
   if (!info?.provider) return;
   const { maskChecks = {} } = await getSettings();
-  const entry = { checkedAt: new Date().toISOString(), verdict, backends: backends.map(({ vendor, count }) => ({ vendor, count })) };
+  const entry = { checkedAt: new Date().toISOString(), verdict, backends: backends.map(({ vendor, count, models }) => ({ vendor, count, models })) };
   await updateSettings({ maskChecks: { ...maskChecks, [`${info.model}|${info.provider}`]: entry } });
 }
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Card, Button, Badge, ModelSelectModal } from "@/shared/components";
+import { modelClaims } from "@/lib/modelMask.js";
 
 const VERDICTS = {
   genuine: { label: "Looks genuine", variant: "success", icon: "verified" },
@@ -154,6 +155,7 @@ export default function MaskCheck() {
                 <thead className="text-text-muted text-left">
                   <tr>
                     <th className="py-1.5 pr-3 font-medium">Claims to be</th>
+                    <th className="py-1.5 pr-3 font-medium">Claimed model</th>
                     <th className="py-1.5 pr-3 font-medium text-right">Samples</th>
                     <th className="py-1.5 pr-3 font-medium text-right">Prompt tokens</th>
                     <th className="py-1.5 font-medium">Example reply</th>
@@ -163,6 +165,7 @@ export default function MaskCheck() {
                   {result.backends.map((b) => (
                     <tr key={`${b.vendor}|${b.promptTokens.min}`} className="border-t border-border-subtle align-top">
                       <td className="py-1.5 pr-3 text-text-main">{b.vendor}</td>
+                      <td className="py-1.5 pr-3 font-mono">{modelClaims(b)}</td>
                       <td className="py-1.5 pr-3 text-right tabular-nums">{b.count}</td>
                       <td className="py-1.5 pr-3 text-right tabular-nums">
                         {b.promptTokens.min === b.promptTokens.max ? b.promptTokens.min : `${b.promptTokens.min}–${b.promptTokens.max}`}
