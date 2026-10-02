@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { compactTokens, num, dateTime, rupiah } from "../saas/format";
 import PackagesTab from "./PackagesTab";
+import UsersTab from "./UsersTab";
 
 const TABS = [
   { id: "ringkasan", label: "Ringkasan" },
@@ -92,82 +93,6 @@ function Overview({ stats }) {
   );
 }
 
-function UsersTab({ users, packages, onChange, busy, setBusy }) {
-  async function patch(id, body) {
-    setBusy(id);
-    await fetch(`/api/admin/users/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).catch(() => {});
-    setBusy(null);
-    onChange();
-  }
-
-  return (
-    <div className="overflow-x-auto rounded-xl border border-border bg-surface">
-      <table className="w-full min-w-[760px] text-sm">
-        <thead>
-          <tr className="border-b border-border bg-surface-2 text-left text-xs uppercase tracking-wide text-text-subtle">
-            <th className="px-4 py-3">Pengguna</th>
-            <th className="px-4 py-3">Paket</th>
-            <th className="px-4 py-3">Pemakaian</th>
-            <th className="px-4 py-3">Peran</th>
-            <th className="px-4 py-3">Status</th>
-            <th className="px-4 py-3 text-right">Aksi</th>
-          </tr>
-        </thead>
-        <tbody>
-          {users.map((u) => (
-            <tr key={u.id} className="border-b border-border last:border-0">
-              <td className="px-4 py-3">
-                <div className="font-medium text-text">{u.name || "—"}</div>
-                <div className="text-xs text-text-subtle">{u.email}</div>
-              </td>
-              <td className="px-4 py-3">
-                <select
-                  className="rounded-lg border border-border bg-surface px-2 py-1 text-sm"
-                  value=""
-                  disabled={busy === u.id}
-                  onChange={(e) => e.target.value && patch(u.id, { packageId: e.target.value })}
-                >
-                  <option value="">{u.packageName || "— belum ada paket —"}</option>
-                  {packages.filter((p) => p.isActive).map((p) => (
-                    <option key={p.id} value={p.id}>Beri paket: {p.name}</option>
-                  ))}
-                </select>
-              </td>
-              <td className="px-4 py-3 whitespace-nowrap text-text-muted">
-                {compactTokens(u.tokensUsed)} / {compactTokens(u.tokenQuota)}
-              </td>
-              <td className="px-4 py-3">
-                <span className={u.role === "admin" ? "font-semibold text-primary" : "text-text-muted"}>
-                  {u.role === "admin" ? "Admin" : "Pengguna"}
-                </span>
-              </td>
-              <td className="px-4 py-3">
-                <span className={u.isActive ? "text-success" : "text-text-subtle"}>
-                  {u.isActive ? "Aktif" : "Ditangguhkan"}
-                </span>
-              </td>
-              <td className="px-4 py-3 text-right">
-                <button
-                  type="button"
-                  className="rounded-lg border border-border px-3 py-1 text-xs font-medium hover:bg-surface-2 disabled:opacity-50"
-                  disabled={busy === u.id}
-                  onClick={() => patch(u.id, { isActive: !u.isActive })}
-                >
-                  {u.isActive ? "Tangguhkan" : "Aktifkan"}
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 function OrdersTab({ orders, users, packages, onChange, busy, setBusy }) {
   const [form, setForm] = useState({ userId: "", packageId: "", amountIdr: "", note: "" });
   const [error, setError] = useState("");
@@ -194,7 +119,12 @@ function OrdersTab({ orders, users, packages, onChange, busy, setBusy }) {
     onChange();
   }
 
-  async function setStatus(id, status) {
+  async function setStatus(order, status) {
+    const id = order.id;
+    if (status === "paid" && !window.confirm(
+      `Tandai lunas ${rupiah(order.amountIdr)} dari ${order.userEmail || order.userId}? ` +
+      `Paket ${order.packageName} langsung diterbitkan dan diaktifkan.`
+    )) return;
     setBusy(id);
     await fetch(`/api/admin/orders/${id}`, {
       method: "PATCH",
@@ -295,12 +225,12 @@ function OrdersTab({ orders, users, packages, onChange, busy, setBusy }) {
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-2">
-                    {o.status !== "paid" && (
+                    {o.status === "pending" && (
                       <button
                         type="button"
                         className="rounded-lg bg-primary px-3 py-1 text-xs font-semibold text-white disabled:opacity-50"
                         disabled={busy === o.id}
-                        onClick={() => setStatus(o.id, "paid")}
+                        onClick={() => setStatus(o, "paid")}
                       >
                         Tandai Lunas
                       </button>
@@ -310,7 +240,7 @@ function OrdersTab({ orders, users, packages, onChange, busy, setBusy }) {
                         type="button"
                         className="rounded-lg border border-border px-3 py-1 text-xs hover:bg-surface-2 disabled:opacity-50"
                         disabled={busy === o.id}
-                        onClick={() => setStatus(o.id, "cancelled")}
+                        onClick={() => setStatus(o, "cancelled")}
                       >
                         Batalkan
                       </button>
@@ -394,7 +324,7 @@ export default function AdminConsole({ adminEmail }) {
       {tab === "ringkasan" && <Overview stats={stats} />}
       {tab === "packages" && <PackagesTab onChange={reload} />}
       {tab === "users" && (
-        <UsersTab users={users} packages={packages} onChange={reload} busy={busy} setBusy={setBusy} />
+        <UsersTab users={users} packages={packages} onChange={reload} />
       )}
       {tab === "orders" && (
         <OrdersTab orders={orders} users={users} packages={packages} onChange={reload} busy={busy} setBusy={setBusy} />

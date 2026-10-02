@@ -16,6 +16,9 @@ import { resolveGrokCliModels } from "open-sse/services/grokCliModels.js";
 import { resolveCursorModels } from "open-sse/services/cursorModels.js";
 import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { updateProviderCredentials } from "@/sse/services/tokenRefresh";
+import { extractApiKey } from "@/sse/services/auth.js";
+import { SAAS_MODE } from "@/lib/saas/config.js";
+import { authorizeApiKey, isModelAllowed } from "@/lib/saas/quota.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { capabilitiesFromServiceKind, getCapabilitiesForModel, aggregateComboCapabilities } from "open-sse/providers/capabilities.js";
 
@@ -586,7 +589,17 @@ export async function GET(request) {
   try {
     // Detect cross-instance recursive /models fetch (another 9router fetching our /models)
     const skipDynamicFetch = request?.headers?.get(INTERNAL_MODELS_FETCH_HEADER) === "1";
-    const data = await buildModelsList([LLM_KIND], { skipDynamicFetch });
+    let data = await buildModelsList([LLM_KIND], { skipDynamicFetch });
+    // A tenant's client should only offer the models their package can call.
+    if (SAAS_MODE) {
+      const auth = await authorizeApiKey(extractApiKey(request));
+      if (!auth.ok) {
+        return Response.json({ error: { message: auth.error, type: "invalid_request_error" } }, {
+          status: auth.status, headers: { "Access-Control-Allow-Origin": "*" },
+        });
+      }
+      data = data.filter((m) => isModelAllowed(auth.allowedModels, m.id));
+    }
     return Response.json({ object: "list", data }, {
       headers: { "Access-Control-Allow-Origin": "*" },
     });

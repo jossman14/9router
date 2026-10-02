@@ -102,6 +102,31 @@ describe("SaaS key + quota gate", () => {
     expect(blocked.status).toBe(402);
   });
 
+  it("blocks an exhausted key on non-chat endpoints and keeps its history after deletion", async () => {
+    const { rejectUnauthorized } = await import("@/lib/saas/quota.js");
+    const { deleteApiKey } = await import("@/lib/db/repos/apiKeysRepo.js");
+    const { getAdapter } = await import("@/lib/db/driver.js");
+    const user = await userWithPlan("c2@example.com");
+    const key = await createApiKey("app", null, user.id);
+
+    // Not enforced at all outside SaaS mode unless the operator asked for keys.
+    expect(await rejectUnauthorized(undefined, "m", { requireApiKey: false })).toBeNull();
+    expect(await rejectUnauthorized(key.key, null, { requireApiKey: true })).toBeNull();
+    expect((await rejectUnauthorized(undefined, null, { requireApiKey: true })).status).toBe(401);
+
+    const quota = (await getActiveSubscription(user.id)).tokenQuota;
+    await saveRequestUsage({
+      provider: "openai", model: "text-embedding-3-small", apiKey: key.key,
+      tokens: { prompt_tokens: quota, completion_tokens: 0 },
+      timestamp: new Date().toISOString(),
+    });
+    expect((await rejectUnauthorized(key.key, null, { requireApiKey: true })).status).toBe(402);
+
+    await deleteApiKey(key.id, user.id);
+    const db = await getAdapter();
+    expect(db.get(`SELECT COUNT(*) AS n FROM usageHistory WHERE userId = ?`, [user.id]).n).toBe(1);
+  });
+
   it("never writes a live credential into the usage table", async () => {
     const user = await userWithPlan("d@example.com");
     const key = await createApiKey("app", null, user.id);

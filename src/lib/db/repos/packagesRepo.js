@@ -17,7 +17,7 @@ const SEED = [
   },
   {
     name: "Pro", description: "Untuk aplikasi produksi.",
-    priceIdr: 50_000, tokenQuota: 60_000_000, allowedModels: [], rpm: 300, maxKeys: 10,
+    priceIdr: 35_000, tokenQuota: 50_000_000, allowedModels: [], rpm: 300, maxKeys: 10,
     durationDays: 30, sortOrder: 2,
   },
 ];

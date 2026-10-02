@@ -1,6 +1,7 @@
 import { findApiKeyRow, touchApiKey } from "@/lib/db/repos/apiKeysRepo.js";
 import { getUserById } from "@/lib/db/repos/usersRepo.js";
 import { getActiveSubscription } from "@/lib/db/repos/subscriptionsRepo.js";
+import { errorResponse } from "open-sse/utils/error.js";
 import { SAAS_MODE } from "./config.js";
 import { checkRate } from "./rateLimit.js";
 
@@ -90,5 +91,24 @@ export async function authorizeApiKey(apiKey, model = null) {
   }
 
   touchApiKey(row.id).catch(() => {});
-  return { ok: true, keyId: row.id, userId: user.id, subscriptionId: sub.id, package: sub.packageName };
+  return {
+    ok: true, keyId: row.id, userId: user.id, subscriptionId: sub.id,
+    package: sub.packageName, allowedModels: sub.allowedModels,
+  };
+}
+
+/**
+ * The same gate for every /v1 handler that is not chat. Returns an error
+ * Response to send back, or null to proceed. SaaS mode always enforces it, so a
+ * tenant whose quota ran out cannot keep spending through embeddings, images or
+ * audio instead.
+ */
+export async function rejectUnauthorized(apiKey, model, settings) {
+  if (!settings?.requireApiKey && !SAAS_MODE) return null;
+  const auth = await authorizeApiKey(apiKey, model);
+  if (auth.ok) return null;
+  return errorResponse(
+    auth.status, auth.error,
+    auth.retryAfter ? { "Retry-After": String(auth.retryAfter) } : null
+  );
 }

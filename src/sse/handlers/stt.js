@@ -1,7 +1,7 @@
 import {
-  extractApiKey, isValidApiKey,
-  getProviderCredentials, markAccountUnavailable,
+  extractApiKey, getProviderCredentials, markAccountUnavailable,
 } from "../services/auth.js";
+import { rejectUnauthorized } from "@/lib/saas/quota.js";
 import { getSettings, getCustomModels } from "@/lib/localDb";
 import { getModelInfo } from "../services/model.js";
 import { handleSttCore } from "open-sse/handlers/sttCore.js";
@@ -46,12 +46,8 @@ export async function handleStt(request) {
   log.request("POST", `/v1/audio/transcriptions | ${modelStr}`);
 
   const settings = await getSettings();
-  if (settings.requireApiKey) {
-    const apiKey = extractApiKey(request);
-    if (!apiKey) return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");
-    const valid = await isValidApiKey(apiKey);
-    if (!valid) return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key");
-  }
+  const denied = await rejectUnauthorized(extractApiKey(request), modelStr, settings);
+  if (denied) return denied;
 
   if (!modelStr) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing model");
   if (!formData.get("file")) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing required field: file");

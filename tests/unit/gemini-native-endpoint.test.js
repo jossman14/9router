@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   handleChat: vi.fn(),
   getSettings: vi.fn(),
-  isValidApiKey: vi.fn(),
+  rejectUnauthorized: vi.fn(),
   getProviderCredentials: vi.fn(),
   markAccountUnavailable: vi.fn(),
   clearAccountError: vi.fn(),
@@ -15,9 +15,12 @@ vi.mock("@/sse/handlers/chat.js", () => ({
 
 vi.mock("@/sse/services/auth.js", () => ({
   getProviderCredentials: mocks.getProviderCredentials,
-  isValidApiKey: mocks.isValidApiKey,
   markAccountUnavailable: mocks.markAccountUnavailable,
   clearAccountError: mocks.clearAccountError,
+}));
+
+vi.mock("@/lib/saas/quota.js", () => ({
+  rejectUnauthorized: mocks.rejectUnauthorized,
 }));
 
 vi.mock("@/lib/localDb", () => ({
@@ -60,7 +63,7 @@ describe("Gemini native v1beta endpoint", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getSettings.mockResolvedValue({ requireApiKey: true });
-    mocks.isValidApiKey.mockResolvedValue(true);
+    mocks.rejectUnauthorized.mockResolvedValue(null);
     mocks.getProviderCredentials.mockResolvedValue({
       apiKey: "real-gemini-key",
       connectionId: "gemini-conn",
@@ -122,7 +125,9 @@ describe("Gemini native v1beta endpoint", () => {
       params: Promise.resolve({ path: ["gemini-2.5-flash-preview-tts:generateContent"] }),
     });
 
-    expect(mocks.isValidApiKey).toHaveBeenCalledWith("client-router-key");
+    expect(mocks.rejectUnauthorized).toHaveBeenCalledWith(
+      "client-router-key", "gemini-2.5-flash-preview-tts", { requireApiKey: true }
+    );
     expect(global.fetch.mock.calls[0][1].headers["x-goog-api-key"]).toBe("real-gemini-key");
     expect(global.fetch.mock.calls[0][1].headers["x-goog-api-key"]).not.toBe("client-router-key");
   });

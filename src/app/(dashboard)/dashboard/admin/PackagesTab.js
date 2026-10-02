@@ -52,6 +52,7 @@ const input = "rounded-lg border border-border bg-surface px-3 py-2 text-sm text
 export default function PackagesTab({ onChange }) {
   const [packages, setPackages] = useState([]);
   const [models, setModels] = useState([]);
+  const [modelQuery, setModelQuery] = useState("");
   const [editing, setEditing] = useState(null); // package id, or "new"
   const [form, setForm] = useState(BLANK);
   const [busy, setBusy] = useState(false);
@@ -68,14 +69,11 @@ export default function PackagesTab({ onChange }) {
     // see through the async boundary.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
-    // Model ids for the allow-list picker come from the gateway's own catalogue,
-    // so an admin cannot type a model this router cannot actually route.
-    fetch("/api/models", { cache: "no-store" })
+    // Model ids for the allow-list picker are the ids /v1/models serves, so the
+    // allow-list matches exactly what a tenant's client will send.
+    fetch("/api/me/models", { cache: "no-store" })
       .then((r) => r.ok ? r.json() : null)
-      .then((d) => {
-        const list = Array.isArray(d?.data) ? d.data : Array.isArray(d?.models) ? d.models : [];
-        setModels(list.map((m) => (typeof m === "string" ? m : m.id)).filter(Boolean));
-      })
+      .then((d) => setModels((d?.models ?? []).map((m) => m.id)))
       .catch(() => {});
   }, []);
 
@@ -184,8 +182,16 @@ export default function PackagesTab({ onChange }) {
                 placeholder="deepseek-v3, glm-4.6, qwen/*" />
             </Field>
             {models.length > 0 && (
-              <div className="mt-2 flex max-h-40 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-border bg-bg-alt p-2">
-                {models.slice(0, 200).map((m) => {
+              <input
+                className={`${input} mt-2 w-full`} type="search" value={modelQuery}
+                onChange={(e) => setModelQuery(e.target.value)}
+                placeholder={`Cari di ${models.length} model yang bisa dirouting…`}
+                aria-label="Cari model"
+              />
+            )}
+            {models.length > 0 && (
+              <div className="mt-2 flex max-h-48 flex-wrap gap-1.5 overflow-y-auto rounded-lg border border-border bg-bg-alt p-2">
+                {models.filter((m) => m.toLowerCase().includes(modelQuery.trim().toLowerCase())).slice(0, 300).map((m) => {
                   const on = selectedModels.includes(m);
                   return (
                     <button

@@ -1,14 +1,14 @@
 import { IconChart } from "@/app/landing/components/Icons";
 import { compactTokens, dateTime, num } from "./format";
 
-export function ModelBreakdown({ byModel }) {
+export function ModelBreakdown({ byModel, days = 14 }) {
   const max = Math.max(1, ...byModel.map((m) => m.tokens));
   return (
     <section className="sd-panel" aria-labelledby="model-title">
       <div className="sd-panel__head">
         <div>
           <h2 className="sd-panel__title" id="model-title">Pemakaian per model</h2>
-          <p className="sd-panel__sub">14 hari terakhir</p>
+          <p className="sd-panel__sub">{days} hari terakhir</p>
         </div>
       </div>
       {byModel.length === 0 ? (
@@ -25,8 +25,10 @@ export function ModelBreakdown({ byModel }) {
                 <th scope="col">Model</th>
                 <th scope="col">Provider</th>
                 <th scope="col" className="sd-num">Permintaan</th>
-                <th scope="col" className="sd-num">Token</th>
-                <th scope="col" style={{ width: "26%" }}>Porsi</th>
+                <th scope="col" className="sd-num">Masuk</th>
+                <th scope="col" className="sd-num">Keluar</th>
+                <th scope="col" className="sd-num">Total</th>
+                <th scope="col" style={{ width: "22%" }}>Porsi</th>
               </tr>
             </thead>
             <tbody>
@@ -35,6 +37,8 @@ export function ModelBreakdown({ byModel }) {
                   <td className="sd-mono">{m.model}</td>
                   <td>{m.provider}</td>
                   <td className="sd-num">{num(m.requests)}</td>
+                  <td className="sd-num">{compactTokens(m.promptTokens)}</td>
+                  <td className="sd-num">{compactTokens(m.completionTokens)}</td>
                   <td className="sd-num">{compactTokens(m.tokens)}</td>
                   <td>
                     <div className="sd-quota__bar" style={{ height: 8 }}>
@@ -57,7 +61,7 @@ export function RecentRequests({ recent }) {
       <div className="sd-panel__head">
         <div>
           <h2 className="sd-panel__title" id="recent-title">Permintaan terakhir</h2>
-          <p className="sd-panel__sub">25 permintaan terbaru</p>
+          <p className="sd-panel__sub">{recent.length} permintaan terbaru dalam periode ini</p>
         </div>
       </div>
       {recent.length === 0 ? (
@@ -76,7 +80,8 @@ export function RecentRequests({ recent }) {
                 <th scope="col">Waktu</th>
                 <th scope="col">Model</th>
                 <th scope="col">Key</th>
-                <th scope="col" className="sd-num">Token</th>
+                <th scope="col" className="sd-num">Masuk</th>
+                <th scope="col" className="sd-num">Keluar</th>
                 <th scope="col">Status</th>
               </tr>
             </thead>
@@ -86,7 +91,8 @@ export function RecentRequests({ recent }) {
                   <td>{dateTime(r.timestamp)}</td>
                   <td className="sd-mono">{r.model || "—"}</td>
                   <td className="sd-mono">{r.apiKey || "—"}</td>
-                  <td className="sd-num">{num(r.tokens)}</td>
+                  <td className="sd-num">{num(r.promptTokens)}</td>
+                  <td className="sd-num">{num(r.completionTokens)}</td>
                   <td>
                     <span className="sd-badge" data-tone={r.status === "ok" ? "ok" : "bad"}>
                       {r.status === "ok" ? "Berhasil" : r.status || "Gagal"}

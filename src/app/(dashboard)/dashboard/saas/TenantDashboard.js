@@ -2,13 +2,14 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  IconRoute, IconGauge, IconKey, IconChart, IconShield, IconBolt, IconTerminal, IconLayers,
+  IconRoute, IconGauge, IconKey, IconChart, IconShield, IconBolt, IconTerminal, IconLayers, IconCode,
 } from "@/app/landing/components/Icons";
 import QuotaCard from "./QuotaCard";
 import UsageChart from "./UsageChart";
 import KeysPanel from "./KeysPanel";
 import SettingsPanel from "./SettingsPanel";
 import BillingPanel from "./BillingPanel";
+import ModelsPanel from "./ModelsPanel";
 import { ModelBreakdown, RecentRequests } from "./UsagePanel";
 import { compactTokens, num } from "./format";
 import "./saas-dashboard.css";
@@ -16,6 +17,7 @@ import "./saas-dashboard.css";
 const TABS = [
   { id: "ringkasan", label: "Ringkasan", Icon: IconGauge },
   { id: "keys", label: "API Key", Icon: IconKey },
+  { id: "model", label: "Model", Icon: IconCode },
   { id: "pemakaian", label: "Pemakaian", Icon: IconChart },
   { id: "paket", label: "Paket & Tagihan", Icon: IconLayers },
   { id: "pengaturan", label: "Pengaturan", Icon: IconShield },
@@ -68,6 +70,24 @@ function QuickStart({ baseUrl }) {
   );
 }
 
+const PERIODS = [7, 14, 30, 90];
+
+function PeriodPicker({ days, onChange }) {
+  return (
+    <div className="lp-chiprow" role="group" aria-label="Periode pemakaian">
+      {PERIODS.map((d) => (
+        <button
+          key={d} type="button" aria-pressed={days === d}
+          className={`lp-btn lp-btn--sm ${days === d ? "lp-btn--primary" : "lp-btn--secondary"}`}
+          onClick={() => onChange(d)}
+        >
+          {d} hari
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // Only the usage-derived parts wait on the fetch. Quota comes from the server
 // render, so the number that matters is on screen at first paint.
 function UsageSkeleton() {
@@ -87,6 +107,7 @@ export default function TenantDashboard({ initialUser, baseUrl }) {
   const [user, setUser] = useState(initialUser);
   const [usage, setUsage] = useState(null);
   const [subscriptions, setSubscriptions] = useState([]);
+  const [days, setDays] = useState(14);
   const [error, setError] = useState("");
 
   // `alive` guards against writing state after unmount (fast tab switches, or
@@ -95,7 +116,7 @@ export default function TenantDashboard({ initialUser, baseUrl }) {
     try {
       const [meRes, useRes] = await Promise.all([
         fetch("/api/me", { cache: "no-store" }),
-        fetch("/api/me/usage", { cache: "no-store" }),
+        fetch(`/api/me/usage?days=${days}`, { cache: "no-store" }),
       ]);
       if (meRes.status === 401 || useRes.status === 401) {
         window.location.href = "/login";
@@ -111,7 +132,7 @@ export default function TenantDashboard({ initialUser, baseUrl }) {
     } catch {
       if (alive()) setError("Gagal memuat data. Periksa koneksi Anda lalu muat ulang halaman.");
     }
-  }, []);
+  }, [days]);
 
   useEffect(() => {
     let alive = true;
@@ -214,13 +235,25 @@ export default function TenantDashboard({ initialUser, baseUrl }) {
                 <h1 className="sd-h1">Pemakaian</h1>
                 <p className="sd-sub">Rincian token yang terpakai per model dan per permintaan.</p>
               </div>
+              <PeriodPicker days={days} onChange={setDays} />
               {usage ? (
                 <>
+                  <Tiles totals={usage.totals} keyCount={activeKeys} />
                   <UsageChart series={usage.series} />
-                  <ModelBreakdown byModel={usage.byModel} />
+                  <ModelBreakdown byModel={usage.byModel} days={usage.days} />
                   <RecentRequests recent={usage.recent} />
                 </>
               ) : <UsageSkeleton />}
+            </>
+          )}
+
+          {tab === "model" && (
+            <>
+              <div>
+                <h1 className="sd-h1">Model</h1>
+                <p className="sd-sub">Model yang bisa dipanggil dengan paket aktif Anda.</p>
+              </div>
+              <ModelsPanel baseUrl={baseUrl} />
             </>
           )}
 

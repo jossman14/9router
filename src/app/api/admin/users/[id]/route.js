@@ -7,6 +7,7 @@ import { getPackageById } from "@/lib/db/repos/packagesRepo.js";
 import { SAAS_MODE } from "@/lib/saas/config.js";
 
 const NO_STORE = { "Cache-Control": "no-store" };
+const SUB_STATUSES = ["active", "cancelled"];
 
 export async function GET(request, { params }) {
   if (!SAAS_MODE) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -50,6 +51,10 @@ export async function PATCH(request, { params }) {
   }
 
   if (body.subscriptionId && body.status) {
+    // "expired" is set by the clock, never by hand; anything else is a typo.
+    if (!SUB_STATUSES.includes(body.status)) {
+      return NextResponse.json({ error: "Status tidak dikenal" }, { status: 400, headers: NO_STORE });
+    }
     const subs = await listSubscriptions(id);
     if (!subs.some((s) => s.id === body.subscriptionId)) {
       return NextResponse.json({ error: "Langganan tidak ditemukan" }, { status: 400, headers: NO_STORE });
