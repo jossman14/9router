@@ -13,6 +13,7 @@ import {
   Cell,
 } from "recharts";
 import Card from "@/shared/components/Card";
+import SourceActivity from "./SourceActivity";
 import { useUsdIdr } from "@/shared/hooks/useUsdIdr";
 
 const COLORS = ["#3B76F6", "#14b8a6", "#f59e0b", "#8b5cf6", "#ef4444", "#06b6d4", "#10b981", "#f97316"];
@@ -44,14 +45,18 @@ const TYPE_META = {
   public: { icon: "public", tint: "text-warning", chip: "bg-warning/10 text-warning border-warning/25" },
 };
 
-function SourceRow({ entry, maxTokens, index, fmtIdr }) {
+function SourceRow({ entry, maxTokens, index, fmtIdr, active, onSelect }) {
   const meta = TYPE_META[entry.type] || TYPE_META.local;
   const tokens = entry.tokens || 0;
   const pct = maxTokens > 0 ? Math.max(2, Math.round((tokens / maxTokens) * 100)) : 0;
   const cachedShare = entry.promptTokens > 0 ? Math.min(100, Math.round((entry.cachedTokens / entry.promptTokens) * 100)) : 0;
 
   return (
-    <div className="flex flex-col gap-1.5 rounded-xl border border-border/60 bg-surface px-3 py-2.5 transition-colors hover:border-border hover:bg-surface-2/60">
+    <button
+      type="button" onClick={() => onSelect(entry.source)} aria-pressed={active}
+      title="Lihat kapan dan jam berapa IP ini memakai gateway"
+      className={`flex w-full flex-col gap-1.5 rounded-xl border px-3 py-2.5 text-left transition-colors hover:border-border hover:bg-surface-2/60 ${active ? "border-primary bg-primary/5" : "border-border/60 bg-surface"}`}
+    >
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <span className={`material-symbols-outlined text-[16px] ${meta.tint}`}>{meta.icon}</span>
@@ -81,7 +86,7 @@ function SourceRow({ entry, maxTokens, index, fmtIdr }) {
         <span className="text-info" title={`Cached tokens (${cachedShare}% of input)`}>⚡ {fmtTokens(entry.cachedTokens)}</span>
         <span className="text-success" title="Output tokens">↓ {fmtTokens(entry.completionTokens)}</span>
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -90,13 +95,16 @@ SourceRow.propTypes = {
   maxTokens: PropTypes.number.isRequired,
   index: PropTypes.number.isRequired,
   fmtIdr: PropTypes.func,
+  active: PropTypes.bool,
+  onSelect: PropTypes.func.isRequired,
 };
 
 /**
  * Per-source (client IP) usage: tokens and cost, split into input/cached/output.
  * Data comes from getUsageStats().bySource.
  */
-export default function SourceBreakdown({ bySource }) {
+export default function SourceBreakdown({ bySource, period = "7d" }) {
+  const [selected, setSelected] = useState(null);
   const [metric, setMetric] = useState("cost");
   const { rate, fmtIdr } = useUsdIdr();
 
@@ -144,6 +152,7 @@ export default function SourceBreakdown({ bySource }) {
   const isCost = metric === "cost";
 
   return (
+    <>
     <Card className="flex min-w-0 flex-col gap-4 p-3 sm:p-4">
       <div className="flex flex-row items-center justify-between gap-2">
         <div className="flex flex-col">
@@ -232,15 +241,19 @@ export default function SourceBreakdown({ bySource }) {
           {/* Detailed per-IP list */}
           <div className="flex max-h-72 flex-col gap-2 overflow-y-auto pr-0.5">
             {entries.map((entry, i) => (
-              <SourceRow key={entry.source} entry={entry} maxTokens={maxTokens} index={i} fmtIdr={isCost ? fmtIdr : null} />
+              <SourceRow key={entry.source} entry={entry} maxTokens={maxTokens} index={i} fmtIdr={isCost ? fmtIdr : null}
+                active={selected === entry.source} onSelect={(src) => setSelected(selected === src ? null : src)} />
             ))}
           </div>
         </>
       )}
     </Card>
+    <SourceActivity sources={entries} selected={selected} onSelect={setSelected} period={period} />
+    </>
   );
 }
 
 SourceBreakdown.propTypes = {
   bySource: PropTypes.object,
+  period: PropTypes.string,
 };

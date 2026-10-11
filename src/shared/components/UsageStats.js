@@ -619,7 +619,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
 
       {/* Per-source (client IP) usage + cost */}
       {!loading && (
-        <SourceBreakdown bySource={stats.bySource} />
+        <SourceBreakdown bySource={stats.bySource} period={period} />
       )}
 
       {/* Table with dropdown selector */}

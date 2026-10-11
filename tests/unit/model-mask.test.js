@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { expectedVendor, detectVendor, judgeMask, clusterBackends, claimedModel, modelClaims } from "@/lib/modelMask.js";
+import { expectedVendor, detectVendor, judgeMask, clusterBackends, claimedModel, modelClaims, claimedCutoff, expectedCutoff } from "@/lib/modelMask.js";
 
 const probe = (over = {}) => ({ ok: true, requested: "cc/claude-sonnet-4-5", returnedModel: "claude-sonnet-4-5", promptTokens: 120, reply: '{"vendor":"Anthropic","model":"Claude"}', ...over });
 
@@ -85,5 +85,31 @@ describe("model mask detection", () => {
     const samples = [probe(), probe(), probe({ promptTokens: 121 })];
     expect(clusterBackends(samples)).toHaveLength(1);
     expect(judgeMask(samples[0], null, samples).verdict).toBe("genuine");
+  });
+
+  it("reads a claimed knowledge cutoff from JSON or prose", () => {
+    expect(claimedCutoff('{"vendor":"OpenAI","model":"gpt-5","cutoff":"2024-09"}')).toBe("2024-09");
+    expect(claimedCutoff('{"cutoff":"October 2023"}')).toBe("2023-10");
+    expect(claimedCutoff("My training data goes up to April 2024.")).toBe("2024-04");
+    expect(claimedCutoff("Data saya sampai Okt 2024")).toBe("2024-10");
+    expect(claimedCutoff('{"cutoff":"2023"}')).toBe("2023");
+    expect(claimedCutoff('{"cutoff":"unknown"}')).toBeNull();
+    expect(expectedCutoff("cc/claude-sonnet-4-5")).toBe("2025-01");
+    expect(expectedCutoff("srb/auto")).toBeNull();
+  });
+
+  it("flags a newer model name answering with a much older cutoff", () => {
+    const old = judgeMask(probe({ reply: '{"vendor":"Anthropic","model":"Claude","cutoff":"2023-04"}' }));
+    expect(old.checks.find((c) => c.id === "cutoff").pass).toBe(false);
+    expect(old.verdict).toBe("suspicious");
+
+    // Under-reporting by a few months is normal and must not trip it.
+    const close = judgeMask(probe({ reply: '{"vendor":"Anthropic","model":"Claude","cutoff":"2024-06"}' }));
+    expect(close.checks.find((c) => c.id === "cutoff").pass).toBe(true);
+    expect(close.verdict).toBe("genuine");
+
+    // Combined with a wrong vendor it is masking, not a fluke.
+    const fake = judgeMask(probe({ reply: '{"vendor":"OpenAI","model":"gpt-4o-mini","cutoff":"2023-10"}' }));
+    expect(fake.verdict).toBe("masked");
   });
 });

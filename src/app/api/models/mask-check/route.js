@@ -12,7 +12,7 @@ import { getModelInfo } from "@/sse/services/model.js";
 // same input across two models, so this text must never vary between probes.
 const PROBE_MESSAGES = [
   { role: "system", content: "Answer truthfully and briefly." },
-  { role: "user", content: 'Which company created you, and what is your exact model name? Reply only as JSON: {"vendor":"...","model":"..."}' },
+  { role: "user", content: 'Which company created you, what is your exact model name, and what is your knowledge cutoff (year and month)? Reply only as JSON: {"vendor":"...","model":"...","cutoff":"YYYY-MM"}' },
 ];
 
 async function probe(model, headers) {
@@ -85,7 +85,7 @@ async function saveMaskResult(requested, verdict, backends) {
   const info = await getModelInfo(requested).catch(() => null);
   if (!info?.provider) return;
   const { maskChecks = {} } = await getSettings();
-  const entry = { checkedAt: new Date().toISOString(), verdict, backends: backends.map(({ vendor, count, models }) => ({ vendor, count, models })) };
+  const entry = { checkedAt: new Date().toISOString(), verdict, backends: backends.map(({ vendor, count, models, cutoffs }) => ({ vendor, count, models, cutoffs })) };
   await updateSettings({ maskChecks: { ...maskChecks, [`${info.model}|${info.provider}`]: entry } });
 }
 

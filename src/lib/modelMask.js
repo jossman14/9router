@@ -71,6 +71,62 @@ function tokenizerCheck(probe, reference) {
   return { id: "tokenizer", label: "Tokenizer fingerprint", pass: drift <= TOKENIZER_TOLERANCE, detail: `${a} vs reference ${b} prompt tokens${hidden}` };
 }
 
+// Earliest knowledge cutoff each family's vendor publishes. A reply claiming a
+// much older cutoff than the name implies is the classic tell of an older,
+// cheaper model served under a newer name. Only "too old" is judged: models
+// under-report their cutoff, and a lower bound stays valid for later versions
+// of a family. Unlisted models are not judged.
+// ponytail: hand-kept table — add a row when a new family ships.
+const KNOWN_CUTOFFS = [
+  { re: /claude-(?:opus|sonnet|haiku)-4|claude-4/, cutoff: "2025-01" },
+  { re: /claude-3[.-]7/, cutoff: "2024-10" },
+  { re: /claude-3[.-]5/, cutoff: "2024-04" },
+  { re: /gpt-5/, cutoff: "2024-09" },
+  { re: /gpt-4\.1/, cutoff: "2024-06" },
+  { re: /gpt-4o/, cutoff: "2023-10" },
+  { re: /gemini-2\.5/, cutoff: "2025-01" },
+  { re: /gemini-2\.0/, cutoff: "2024-08" },
+];
+const CUTOFF_SLACK_MONTHS = 12;
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+const MONTH_ALIASES = { mei: 4, agu: 7, agt: 7, okt: 9, des: 11 };
+
+const toMonths = (label) => {
+  const [y, m] = label.split("-").map(Number);
+  return y * 12 + (m || 1) - 1;
+};
+
+export function expectedCutoff(model) {
+  const name = baseName(model);
+  return KNOWN_CUTOFFS.find((c) => c.re.test(name))?.cutoff || null;
+}
+
+// The knowledge cutoff a probe reply claims, as "YYYY-MM" (or "YYYY" when no
+// month is given), or null. Prefers the JSON `cutoff` field over free text.
+export function claimedCutoff(reply) {
+  const text = String(reply || "");
+  const field = text.match(/"cutoff"\s*:\s*"([^"]{1,60})"/)?.[1] ?? text;
+  const iso = field.match(/\b(20\d{2})[-/.](0?[1-9]|1[0-2])\b/);
+  if (iso) return `${iso[1]}-${iso[2].padStart(2, "0")}`;
+  for (const [, word, year] of field.matchAll(/\b([a-z]{3})[a-z]*\.?\s+(20\d{2})\b/gi)) {
+    const key = word.toLowerCase();
+    const idx = MONTHS.includes(key) ? MONTHS.indexOf(key) : MONTH_ALIASES[key];
+    if (idx !== undefined) return `${year}-${String(idx + 1).padStart(2, "0")}`;
+  }
+  return field.match(/\b(20\d{2})\b/)?.[1] ?? null;
+}
+
+function cutoffCheck(probe) {
+  const expected = expectedCutoff(probe.requested) || expectedCutoff(probe.returnedModel);
+  const claimed = claimedCutoff(probe.reply);
+  if (!expected || !claimed) {
+    return { id: "cutoff", label: "Knowledge cutoff", pass: null, detail: `claims ${claimed || "?"}${expected ? `, expected ≥ ${expected}` : ", no published cutoff for this model"}` };
+  }
+  const gap = toMonths(expected) - toMonths(claimed);
+  const pass = gap <= CUTOFF_SLACK_MONTHS;
+  return { id: "cutoff", label: "Knowledge cutoff", pass, detail: `claims ${claimed}, expected ≥ ${expected}${pass ? "" : ` — ${gap} months older: likely an older model`}` };
+}
+
 const UNDISCLOSED = /^(?:unknown|not? ?(?:disclosed|specified|available|provided|sure)|n\/?a|none|null|undisclosed|-|\?+)$/i;
 
 // The model name a probe reply claims (`{"model":"..."}`), or null when the
@@ -97,9 +153,10 @@ export function clusterBackends(samples) {
     if (g) {
       g.count++;
       g.models = tally(g.models, claimedModel(s.reply));
+      g.cutoffs = tally(g.cutoffs, claimedCutoff(s.reply));
       g.promptTokens = { min: Math.min(g.promptTokens.min, t), max: Math.max(g.promptTokens.max, t) };
     } else {
-      groups.push({ vendor, count: 1, promptTokens: { min: t, max: t }, models: tally({}, claimedModel(s.reply)), reply: s.reply });
+      groups.push({ vendor, count: 1, promptTokens: { min: t, max: t }, models: tally({}, claimedModel(s.reply)), cutoffs: tally({}, claimedCutoff(s.reply)), reply: s.reply });
     }
   }
   return groups.sort((a, b) => b.count - a.count);
@@ -129,7 +186,7 @@ export function judgeMask(probe, reference = null, samples = null) {
   // model is the claim to verify, so only the identity check can judge it.
   const named = expectedVendor(probe.requested);
   const expected = named || expectedVendor(probe.returnedModel);
-  const checks = [returnedCheck(probe, named), identityCheck(probe, expected), tokenizerCheck(probe, reference), consistencyCheck(samples)].filter(Boolean);
+  const checks = [returnedCheck(probe, named), identityCheck(probe, expected), cutoffCheck(probe), tokenizerCheck(probe, reference), consistencyCheck(samples)].filter(Boolean);
   const fails = checks.filter((c) => c.pass === false);
   const passes = checks.filter((c) => c.pass === true);
 

@@ -951,3 +951,105 @@ export async function getRecentLogs(limit = 200) {
     return [];
   }
 }
+
+// ─── Per-source (client IP) activity ─────────────────────────────────────
+// WIB is a fixed UTC+7 with no DST, so hour buckets line up with UTC hours and
+// a WIB midnight is `<day>T00:00:00+07:00`.
+const SOURCE_SPAN_MS = { "24h": 864e5, "7d": 7 * 864e5, "30d": 30 * 864e5, "60d": 60 * 864e5 };
+const HOUR_MS = 3600e3;
+const SOURCE_RECENT = 100;
+// ponytail: rows are aggregated in JS; past this many the oldest are dropped.
+// Move the bucketing into SQL if one IP ever outgrows it.
+const SOURCE_ROW_CAP = 50_000;
+const wibFmt = new Intl.DateTimeFormat("en-CA", {
+  timeZone: WIB_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", hour12: false,
+});
+
+function wibParts(ms) {
+  const p = Object.fromEntries(wibFmt.formatToParts(new Date(ms)).map((x) => [x.type, x.value]));
+  return { day: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour) % 24 };
+}
+
+const rowSource = (meta) => parseJson(meta, {})?.source || "local";
+
+/**
+ * When one client IP used the gateway: a dense timeline (hourly up to 7 days,
+ * daily beyond), a 24-hour activity profile in WIB, its models, and its most
+ * recent requests. `source` is the raw key from getUsageStats().bySource.
+ */
+export async function getSourceActivity(source, period = "7d") {
+  const db = await getAdapter();
+  const now = Date.now();
+  const since = period === "today"
+    ? Date.parse(`${wibParts(now).day}T00:00:00+07:00`)
+    : SOURCE_SPAN_MS[period] ? now - SOURCE_SPAN_MS[period] : null;
+
+  // Local rows may carry no source at all, so only remote IPs can use the
+  // text prefilter. The caller validates `source` as an IP, so it holds no
+  // LIKE wildcards.
+  const where = [];
+  const args = [];
+  if (since !== null) { where.push("timestamp >= ?"); args.push(new Date(since).toISOString()); }
+  if (source !== "local") { where.push("meta LIKE ?"); args.push(`%"source":${JSON.stringify(source)}%`); }
+  const rows = db.all(
+    `SELECT timestamp, provider, model, apiKey, promptTokens, completionTokens, cost, status, meta
+     FROM usageHistory ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+     ORDER BY timestamp DESC LIMIT ${SOURCE_ROW_CAP}`,
+    args
+  ).filter((r) => rowSource(r.meta) === source);
+
+  const hourly = since !== null && now - since <= SOURCE_SPAN_MS["7d"];
+  const oldest = rows.length ? Date.parse(rows[rows.length - 1].timestamp) : now;
+  const start = since ?? oldest;
+  const buckets = new Map();
+  if (hourly) {
+    for (let t = Math.floor(start / HOUR_MS) * HOUR_MS; t <= now; t += HOUR_MS) {
+      const { day, hour } = wibParts(t);
+      buckets.set(`${day} ${hour}`, { label: `${day.slice(5)} ${String(hour).padStart(2, "0")}:00`, requests: 0, tokens: 0, cost: 0 });
+    }
+  } else {
+    for (let t = Date.parse(`${wibParts(start).day}T00:00:00+07:00`); t <= now; t += 864e5) {
+      const { day } = wibParts(t);
+      buckets.set(day, { label: day, requests: 0, tokens: 0, cost: 0 });
+    }
+  }
+
+  const byHour = Array.from({ length: 24 }, (_, hour) => ({ hour, requests: 0, tokens: 0 }));
+  const byModel = new Map();
+  const totals = { requests: 0, promptTokens: 0, completionTokens: 0, cost: 0, errors: 0 };
+  for (const r of rows) {
+    const { day, hour } = wibParts(Date.parse(r.timestamp));
+    const tokens = (r.promptTokens || 0) + (r.completionTokens || 0);
+    const b = buckets.get(hourly ? `${day} ${hour}` : day);
+    if (b) { b.requests++; b.tokens += tokens; b.cost += r.cost || 0; }
+    byHour[hour].requests++;
+    byHour[hour].tokens += tokens;
+    const m = byModel.get(r.model) || { model: r.model || "unknown", requests: 0, tokens: 0 };
+    m.requests++;
+    m.tokens += tokens;
+    byModel.set(r.model, m);
+    totals.requests++;
+    totals.promptTokens += r.promptTokens || 0;
+    totals.completionTokens += r.completionTokens || 0;
+    totals.cost += r.cost || 0;
+    if (r.status && r.status !== "ok") totals.errors++;
+  }
+
+  return {
+    source,
+    ...describeSource(source),
+    period,
+    granularity: hourly ? "hour" : "day",
+    truncated: rows.length >= SOURCE_ROW_CAP,
+    firstSeen: rows.length ? rows[rows.length - 1].timestamp : null,
+    lastSeen: rows[0]?.timestamp ?? null,
+    totals,
+    timeline: [...buckets.values()],
+    byHour,
+    byModel: [...byModel.values()].sort((a, b) => b.tokens - a.tokens).slice(0, 10),
+    recent: rows.slice(0, SOURCE_RECENT).map((r) => ({
+      timestamp: r.timestamp, provider: r.provider, model: r.model, apiKey: maskApiKey(r.apiKey),
+      promptTokens: r.promptTokens || 0, completionTokens: r.completionTokens || 0, cost: r.cost || 0, status: r.status,
+    })),
+  };
+}

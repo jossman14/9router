@@ -156,6 +156,7 @@ export default function MaskCheck() {
                   <tr>
                     <th className="py-1.5 pr-3 font-medium">Claims to be</th>
                     <th className="py-1.5 pr-3 font-medium">Claimed model</th>
+                    <th className="py-1.5 pr-3 font-medium">Claimed cutoff</th>
                     <th className="py-1.5 pr-3 font-medium text-right">Samples</th>
                     <th className="py-1.5 pr-3 font-medium text-right">Prompt tokens</th>
                     <th className="py-1.5 font-medium">Example reply</th>
@@ -166,6 +167,9 @@ export default function MaskCheck() {
                     <tr key={`${b.vendor}|${b.promptTokens.min}`} className="border-t border-border-subtle align-top">
                       <td className="py-1.5 pr-3 text-text-main">{b.vendor}</td>
                       <td className="py-1.5 pr-3 font-mono">{modelClaims(b)}</td>
+                      <td className="py-1.5 pr-3 font-mono">
+                        {Object.entries(b.cutoffs || {}).sort((x, y) => y[1] - x[1]).map(([c, n]) => `${c} ×${n}`).join(", ") || "—"}
+                      </td>
                       <td className="py-1.5 pr-3 text-right tabular-nums">{b.count}</td>
                       <td className="py-1.5 pr-3 text-right tabular-nums">
                         {b.promptTokens.min === b.promptTokens.max ? b.promptTokens.min : `${b.promptTokens.min}–${b.promptTokens.max}`}
