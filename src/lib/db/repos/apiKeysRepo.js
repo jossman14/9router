@@ -2,6 +2,8 @@ import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
 import { SAAS_MODE } from "../../saas/config.js";
 import { generateKey, hashKey, decryptKey } from "../../saas/keys.js";
+import { keyAccessFromColumns, keyAccessToColumns } from "../../../shared/utils/keyAccess.js";
+import { KEY_ACCESS_UNRESTRICTED } from "../../../shared/constants/keyAccess.js";
 
 function rowToKey(row) {
   if (!row) return null;
@@ -19,6 +21,7 @@ function rowToKey(row) {
     lastUsedAt: row.lastUsedAt || null,
     isActive: row.isActive === 1 || row.isActive === true,
     createdAt: row.createdAt,
+    access: keyAccessFromColumns(row.accessRestricted, row.accessAllow),
   };
 }
 
@@ -34,6 +37,12 @@ export async function getApiKeyById(id) {
   const db = await getAdapter();
   const row = db.get(`SELECT * FROM apiKeys WHERE id = ?`, [id]);
   return rowToKey(row);
+}
+
+// Used by the /v1 handlers to read the presented key's access settings.
+// Goes through findApiKeyRow so hashed SaaS keys resolve too.
+export async function getApiKeyByKey(key) {
+  return rowToKey(await findApiKeyRow(key));
 }
 
 /**
@@ -81,10 +90,12 @@ export async function createApiKey(name, machineId, userId = null) {
   const result = generateApiKeyWithMachine(machineId);
   const apiKey = {
     id: uuidv4(), name, key: result.key, machineId, isActive: true, createdAt: now,
+    access: { restricted: false, allow: [] },
   };
+  const cols = keyAccessToColumns(KEY_ACCESS_UNRESTRICTED);
   db.run(
-    `INSERT INTO apiKeys(id, key, name, machineId, isActive, createdAt) VALUES(?, ?, ?, ?, ?, ?)`,
-    [apiKey.id, apiKey.key, apiKey.name, apiKey.machineId, 1, apiKey.createdAt]
+    `INSERT INTO apiKeys(id, key, name, machineId, isActive, createdAt, accessRestricted, accessAllow) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+    [apiKey.id, apiKey.key, apiKey.name, apiKey.machineId, 1, apiKey.createdAt, cols.accessRestricted, cols.accessAllow]
   );
   return apiKey;
 }
@@ -98,8 +109,13 @@ export async function updateApiKey(id, data) {
     // `key` is never client-writable — rotating means deleting and re-creating.
     const name = data.name !== undefined ? data.name : row.name;
     const isActive = data.isActive !== undefined ? (data.isActive ? 1 : 0) : row.isActive;
-    db.run(`UPDATE apiKeys SET name = ?, isActive = ? WHERE id = ?`, [name, isActive, id]);
-    result = rowToKey({ ...row, name, isActive });
+    const access = data.access !== undefined ? data.access : keyAccessFromColumns(row.accessRestricted, row.accessAllow);
+    const cols = keyAccessToColumns(access);
+    db.run(
+      `UPDATE apiKeys SET name = ?, isActive = ?, accessRestricted = ?, accessAllow = ? WHERE id = ?`,
+      [name, isActive, cols.accessRestricted, cols.accessAllow, id]
+    );
+    result = rowToKey(db.get(`SELECT * FROM apiKeys WHERE id = ?`, [id]));
   });
   return result;
 }

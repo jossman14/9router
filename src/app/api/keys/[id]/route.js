@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { deleteApiKey, getApiKeyById, updateApiKey } from "@/lib/localDb";
 import { SAAS_MODE } from "@/lib/saas/config.js";
 import { getSessionUser } from "@/lib/saas/session.js";
+import { validateKeyAccessInput } from "@/shared/utils/keyAccess.js";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -32,7 +33,7 @@ export async function GET(request, { params }) {
   }
 }
 
-// PUT /api/keys/[id] - enable/disable or rename
+// PUT /api/keys/[id] - enable/disable, rename or set access
 export async function PUT(request, { params }) {
   try {
     const { id } = await params;
@@ -44,6 +45,11 @@ export async function PUT(request, { params }) {
     const updateData = {};
     if (body.isActive !== undefined) updateData.isActive = !!body.isActive;
     if (typeof body.name === "string" && body.name.trim()) updateData.name = body.name.trim().slice(0, 60);
+    if (body.access !== undefined) {
+      const checked = validateKeyAccessInput(body.access);
+      if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: 400, headers: NO_STORE });
+      updateData.access = checked.value;
+    }
 
     return NextResponse.json({ key: await updateApiKey(id, updateData) }, { headers: NO_STORE });
   } catch (error) {
